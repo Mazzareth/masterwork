@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { InteractionType, InteractionResponseType } from 'discord-interactions';
 import { verifyDiscordRequest } from '../../../bot/utils';
 import { command as pingCommand, execute as pingExecute } from '../../../bot/commands/ping';
+import { command as helloCommand, execute as helloExecute } from '../../../bot/commands/hello';
 
 export async function POST(req: Request) {
   const { isValid, body } = await verifyDiscordRequest(req);
@@ -19,8 +20,11 @@ export async function POST(req: Request) {
   if (interaction.type === InteractionType.APPLICATION_COMMAND) {
     switch (interaction.data.name) {
       case pingCommand.name:
-        const response = await pingExecute();
-        return new NextResponse(JSON.stringify(response), { status: 200 });
+        const pingResponse = await pingExecute();
+        return new NextResponse(JSON.stringify(pingResponse), { status: 200 });
+      case helloCommand.name:
+        const helloResponse = await helloExecute();
+        return new NextResponse(JSON.stringify(helloResponse), { status: 200 });
       default:
         return new NextResponse('Unknown command', { status: 400 });
     }

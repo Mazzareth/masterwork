@@ -1,14 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-export async function GET() {
-  const discord_client_id = process.env.DISCORD_CLIENT_ID;
-  const redirect_uri = process.env.NODE_ENV === 'production' 
-    ? 'https://www.masterwork.app/api/auth/discord/callback'
-    : 'http://localhost:3000/api/auth/discord/callback';
+export async function GET(req: NextRequest) {
+  const discord_api = 'https://discord.com/api/oauth2/authorize';
+  const client_id = process.env.DISCORD_CLIENT_ID!;
 
-  const scope = 'identify email';
+  // Determine the redirect URI based on the environment
+  const host = req.headers.get('host');
+  const protocol = host?.startsWith('localhost') ? 'http' : 'https';
+  const redirect_uri = `${protocol}://${host}/api/auth/discord/callback`;
 
-  const url = `https://discord.com/api/oauth2/authorize?client_id=${discord_client_id}&redirect_uri=${encodeURIComponent(redirect_uri)}&response_type=code&scope=${encodeURIComponent(scope)}`;
+  const params = new URLSearchParams({
+    client_id: client_id,
+    redirect_uri: redirect_uri,
+    response_type: 'code',
+    scope: 'identify email',
+  });
 
-  return NextResponse.redirect(url);
+  const redirectUrl = `${discord_api}?${params.toString()}`;
+  return NextResponse.redirect(redirectUrl);
 }
