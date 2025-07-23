@@ -234,7 +234,6 @@ export default function ProfilePage() {
             <button
                 onClick={handleSaveProfile}
                 className="btn btn-primary"
-                disabled={!primaryRole || !secondaryRole || !leagueIGN || !hashtag}
             >
                 Save Changes
             </button>

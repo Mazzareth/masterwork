@@ -57,11 +57,7 @@ export default function LoginPage() {
               <span>Continue with Google</span>
             </button>
 
-            <button onClick={signInAsGuest} className="btn btn-secondary w-full">
-              Sign In as Guest (Dev)
-            </button>
-
-            <div className="divider text-xs text-base-content/50">notice</div>
+            
 
             <p className="text-xs text-base-content/50">
               By signing in, you agree to our Terms of Service.
