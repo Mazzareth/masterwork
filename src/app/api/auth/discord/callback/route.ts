@@ -67,8 +67,9 @@ export async function GET(req: NextRequest) {
     }
 
     return NextResponse.redirect(new URL('/profile?success=Discord linked', req.url));
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Discord callback error:', error);
-    return NextResponse.redirect(new URL(`/profile?error=${error.message || 'An unknown error occurred'}`, req.url));
+    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+    return NextResponse.redirect(new URL(`/profile?error=${encodeURIComponent(errorMessage)}`, req.url));
   }
 }
