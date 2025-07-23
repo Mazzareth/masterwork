@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   const discord_client_id = process.env.DISCORD_CLIENT_ID;
   const redirect_uri = process.env.NODE_ENV === 'production' 
     ? 'https://www.masterwork.app/api/auth/discord/callback'

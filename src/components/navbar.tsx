@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '../contexts/AuthContext';
@@ -116,9 +117,11 @@ export default function Navbar() {
             <div tabIndex={0} role="button" className="btn btn-ghost btn-circle avatar">
               {user.photoURL ? (
                 <div className="w-10 rounded-full">
-                  <img
+                  <Image
                     alt={user.displayName || 'User'}
                     src={user.photoURL}
+                    width={40}
+                    height={40}
                   />
                 </div>
               ) : (

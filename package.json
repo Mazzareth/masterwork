@@ -6,9 +6,14 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "deploy-commands": "tsx --env-file=.env.local src/bot/deploy-commands.ts",
+    "register-commands": "tsx --env-file=.env.local src/bot/register-commands.ts"
   },
   "dependencies": {
+    "discord-interactions": "^4.3.0",
+    "discord.js": "^14.21.0",
+    "dotenv": "^17.2.0",
     "firebase": "^12.0.0",
     "firebase-admin": "^13.4.0",
     "next": "15.4.3",
@@ -27,6 +32,8 @@
     "eslint": "^9",
     "eslint-config-next": "15.4.3",
     "tailwindcss": "^4",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.20.3",
     "typescript": "^5"
   }
 }

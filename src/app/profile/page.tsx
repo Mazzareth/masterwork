@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Image from 'next/image';
 import { auth } from '@/lib/firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { getUserProfile, createUserProfile, updateUserProfile } from '@/lib/firestoreUtils';
@@ -128,7 +129,7 @@ export default function ProfilePage() {
                 {profile?.photoURL && (
                     <div className="avatar">
                         <div className="w-24 rounded-full">
-                            <img src={profile.photoURL} alt="Profile" />
+                            <Image src={profile.photoURL} alt="Profile" width={96} height={96} />
                         </div>
                     </div>
                 )}
@@ -185,7 +186,7 @@ export default function ProfilePage() {
                         <div className="flex items-center space-x-4 p-2 bg-base-300 rounded-lg">
                           <div className="avatar">
                             <div className="w-12 rounded-full ring ring-primary ring-offset-base-100 ring-offset-2">
-                              <img src={`https://cdn.discordapp.com/avatars/${profile.discordProfile.id}/${profile.discordProfile.avatar}.png`} alt="Discord Avatar" />
+                              <Image src={`https://cdn.discordapp.com/avatars/${profile.discordProfile.id}/${profile.discordProfile.avatar}.png`} alt="Discord Avatar" width={48} height={48} />
                             </div>
                           </div>
                           <div>
