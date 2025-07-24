@@ -17,22 +17,18 @@ const mockTeams: Team[] = [
 ];
 
 export default function Navbar() {
-  const [showTeamsDropdown, setShowTeamsDropdown] = useState(false);
-  const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [userTeams] = useState<Team[]>(mockTeams); // Mock user teams
   const { user, logout, loading } = useAuth();
   const pathname = usePathname();
 
-  // Reset dropdown state when navigating to a new page
+  // This effect can be used to close dropdowns on navigation if needed in the future.
   useEffect(() => {
-    setShowTeamsDropdown(false);
-    setShowUserDropdown(false);
+    // Example: document.activeElement.blur();
   }, [pathname]);
 
   const handleSignOut = async () => {
     try {
       await logout();
-      setShowUserDropdown(false);
     } catch (error) {
       console.error('Sign out failed:', error);
     }
@@ -140,7 +136,6 @@ export default function Navbar() {
                 <p className="text-xs text-base-content/70">{user.email}</p>
               </li>
               <li><Link href="/profile">Profile</Link></li>
-              <li><Link href="/settings">Settings</Link></li>
               <li><a onClick={handleSignOut}>Sign Out</a></li>
             </ul>
           </div>
