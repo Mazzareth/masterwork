@@ -1,50 +1,33 @@
 import { NextResponse } from 'next/server';
-import { InteractionType, InteractionResponseType, verifyKey } from 'discord-interactions';
+import { InteractionType, InteractionResponseType } from 'discord-interactions';
+import nacl from 'tweetnacl';
 
 export async function POST(req: Request) {
-  console.log('Received interaction request.');
-
   const signature = req.headers.get('x-signature-ed25519');
   const timestamp = req.headers.get('x-signature-timestamp');
   const rawBody = await req.text();
 
   if (!signature || !timestamp) {
-    console.error('Missing signature or timestamp headers.');
     return new NextResponse('Bad request signature', { status: 401 });
   }
 
-  console.log('Verifying request signature...');
-  const isValid = verifyKey(
-    rawBody,
-    signature,
-    timestamp,
-    process.env.DISCORD_PUBLIC_KEY!
+  const isVerified = nacl.sign.detached.verify(
+    Buffer.from(timestamp + rawBody),
+    Buffer.from(signature, 'hex'),
+    Buffer.from(process.env.DISCORD_PUBLIC_KEY!, 'hex')
   );
 
-  if (!isValid) {
-    console.error('Invalid request signature.');
-    return new NextResponse('Bad request signature', { status: 401 });
+  if (!isVerified) {
+    return new NextResponse('Invalid request signature', { status: 401 });
   }
 
-  console.log('Signature verified.');
+  const body = JSON.parse(rawBody);
 
-  try {
-    const body = JSON.parse(rawBody);
-    const { type } = body;
+  if (body.type === InteractionType.PING) {
+    return new Response(JSON.stringify({ type: InteractionResponseType.PONG }), { status: 200 });
+  } 
 
-    console.log(`Received interaction type: ${type}`);
-
-    if (type === InteractionType.PING) {
-      console.log('Handling PING request.');
-      return NextResponse.json({ type: InteractionResponseType.PONG });
-    }
-
-    // Handle other interaction types here
-    console.log('Acknowledging other interaction.');
-    return NextResponse.json({ type: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE });
-
-  } catch (err) {
-    console.error('Error processing interaction:', err);
-    return new NextResponse('Internal Server Error', { status: 500 });
-  }
+  // Handle other interaction types here
+  console.log('Acknowledging other interaction.');
+  return NextResponse.json({ type: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE });
 }
