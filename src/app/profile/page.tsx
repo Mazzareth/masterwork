@@ -6,7 +6,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { auth } from '@/lib/firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { getUserProfile, createUserProfile, updateUserProfile } from '@/lib/firestoreUtils';
-import { useIOSPointer } from '@/contexts/IOSPointerContext';
 
 interface DiscordProfile {
   id: string;
@@ -36,7 +35,6 @@ export default function ProfilePage() {
   const [secondaryRole, setSecondaryRole] = useState('');
   const [toast, setToast] = useState<{ show: boolean; message: string; type: 'success' | 'error' }>({ show: false, message: '', type: 'success' });
   const [activeTab, setActiveTab] = useState('profile');
-  const { isEnabled, setIsEnabled } = useIOSPointer();
 
   const roleOptions = ["Top", "Jungle", "Mid", "ADC", "Support"];
 
@@ -141,7 +139,7 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className={`min-h-screen bg-gradient-to-br from-base-100 via-base-200 to-base-300 relative overflow-hidden ${!isEnabled ? 'ios-pointer-disabled' : ''}`}>
+    <div className={`min-h-screen bg-gradient-to-br from-base-100 via-base-200 to-base-300 relative overflow-hidden`}>
       {/* Animated Background Elements */}
       <motion.div 
         className="absolute inset-0 opacity-10"
@@ -570,15 +568,9 @@ export default function ProfilePage() {
                       Interface Settings
                     </motion.h3>
                     <div className="form-control max-w-md mx-auto">
-                      <label className="label cursor-pointer p-4 rounded-2xl bg-base-100/50 hover:bg-base-300/50 transition-colors duration-300 border border-transparent hover:border-primary/50">
-                        <span className="label-text text-lg font-bold">Enable iOS Pointer</span>
-                        <input 
-                          type="checkbox" 
-                          className="toggle toggle-primary toggle-lg"
-                          checked={isEnabled}
-                          onChange={(e) => setIsEnabled(e.target.checked)}
-                        />
-                      </label>
+                      <a href="/settings" className="btn btn-primary">
+                        Go to Settings
+                      </a>
                     </div>
                   </div>
                 </div>
