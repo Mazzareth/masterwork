@@ -15,6 +15,7 @@ interface UserProfile {
   discordProfile?: DiscordProfile;
   leagueIGN?: string;
   hashtag?: string;
+  puuid?: string;
   primaryRole?: string;
   secondaryRole?: string;
 }

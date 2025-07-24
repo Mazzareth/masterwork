@@ -22,9 +22,110 @@ interface UserProfile {
   discordProfile?: DiscordProfile;
   leagueIGN?: string;
   hashtag?: string;
+  puuid?: string;
   primaryRole?: string;
   secondaryRole?: string;
 }
+
+const RiotIntegration = ({ profile, setProfile }: { profile: UserProfile | null, setProfile: (profile: UserProfile | null) => void }) => {
+  const [user] = useAuthState(auth);
+  const [gameName, setGameName] = useState(profile?.leagueIGN || '');
+  const [tagLine, setTagLine] = useState(profile?.hashtag || '');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+
+  useEffect(() => {
+    setGameName(profile?.leagueIGN || '');
+    setTagLine(profile?.hashtag || '');
+  }, [profile]);
+
+  const handleLinkAccount = async () => {
+    if (!user) return;
+    setLoading(true);
+    setError(null);
+    setSuccess(false);
+
+    try {
+      const idToken = await user.getIdToken();
+      const response = await fetch('/api/riot', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ gameName, tagLine }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to link account.');
+      }
+
+      setProfile({ ...profile!, puuid: data.puuid, leagueIGN: gameName, hashtag: tagLine });
+      setSuccess(true);
+
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, delay: 0.2 }}
+      className="card bg-base-200/80 backdrop-blur-sm shadow-2xl border border-primary/30 h-full"
+    >
+      <div className="card-body">
+        <h2 className="card-title text-2xl text-primary mb-4">League of Legends Integration</h2>
+        {profile?.puuid ? (
+          <div className="text-center">
+            <p className="text-success font-bold">Account Linked!</p>
+            <p>PUUID: {profile.puuid.substring(0, 15)}...</p>
+          </div>
+        ) : (
+          <div>
+            <div className="form-control w-full">
+              <label className="label">
+                <span className="label-text">Riot ID (Game Name)</span>
+              </label>
+              <input
+                type="text"
+                placeholder="e.g., CrowsB4Hoes"
+                className="input input-bordered w-full"
+                value={gameName}
+                onChange={(e) => setGameName(e.target.value)}
+              />
+            </div>
+            <div className="form-control w-full mt-4">
+              <label className="label">
+                <span className="label-text">Hashtag</span>
+              </label>
+              <input
+                type="text"
+                placeholder="e.g., CAW"
+                className="input input-bordered w-full"
+                value={tagLine}
+                onChange={(e) => setTagLine(e.target.value)}
+              />
+            </div>
+            <div className="card-actions justify-end mt-6">
+              <button className="btn btn-primary" onClick={handleLinkAccount} disabled={loading}>
+                {loading ? <span className="loading loading-spinner"></span> : 'Check Account'}
+              </button>
+            </div>
+            {error && <p className="text-error mt-4">{error}</p>}
+            {success && <p className="text-success mt-4">Account linked successfully!</p>}
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
+};
 
 export default function ProfilePage() {
   const [user] = useAuthState(auth);
@@ -396,7 +497,10 @@ export default function ProfilePage() {
                 exit={{ opacity: 0, y: -20 }}
                 transition={{ duration: 0.3 }}
               >
-                <DiscordIntegration profile={profile} />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <DiscordIntegration profile={profile} />
+                  <RiotIntegration profile={profile} setProfile={setProfile} />
+                </div>
               </motion.div>
             )}
 
