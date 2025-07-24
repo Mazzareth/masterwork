@@ -6,6 +6,27 @@ import { auth, db } from '@/lib/firebase-admin';
  * @param {NextRequest} req - The incoming Next.js request.
  * @returns {Promise<NextResponse>} A Next.js response.
  */
+interface RiotAccount {
+  puuid: string;
+  gameName: string;
+  tagLine: string;
+}
+
+interface RiotApiError {
+  status: {
+    message: string;
+    status_code: number;
+  };
+}
+
+interface FirebaseError extends Error {
+  code: string;
+}
+
+function isFirebaseError(error: unknown): error is FirebaseError {
+  return typeof error === 'object' && error !== null && 'code' in error;
+}
+
 export async function POST(req: NextRequest) {
   try {
     // 1. Verify user authentication from the session cookie
@@ -36,16 +57,16 @@ export async function POST(req: NextRequest) {
     const riotResponse = await fetch(riotApiUrl);
 
     if (!riotResponse.ok) {
-        const errorData = await riotResponse.json();
-        console.error('Riot API error:', errorData);
-        return NextResponse.json({ error: 'Failed to fetch account from Riot API.', details: errorData }, { status: riotResponse.status });
+      const errorData: RiotApiError = await riotResponse.json();
+      console.error('Riot API error:', errorData);
+      return NextResponse.json({ error: 'Failed to fetch account from Riot API.', details: errorData }, { status: riotResponse.status });
     }
 
-    const riotData = await riotResponse.json();
+    const riotData: RiotAccount = await riotResponse.json();
     const { puuid } = riotData;
 
     if (!puuid) {
-        return NextResponse.json({ error: 'PUUID not found in Riot API response.' }, { status: 404 });
+      return NextResponse.json({ error: 'PUUID not found in Riot API response.' }, { status: 404 });
     }
 
     // 4. Save PUUID to Firestore
@@ -57,8 +78,8 @@ export async function POST(req: NextRequest) {
 
   } catch (error) {
     console.error('Riot API route error:', error);
-    if (error instanceof Error && 'code' in error && ((error as any).code === 'auth/session-cookie-expired' || (error as any).code === 'auth/session-cookie-revoked')) {
-        return NextResponse.json({ error: 'Session expired, please log in again.' }, { status: 401 });
+    if (isFirebaseError(error) && (error.code === 'auth/session-cookie-expired' || error.code === 'auth/session-cookie-revoked')) {
+      return NextResponse.json({ error: 'Session expired, please log in again.' }, { status: 401 });
     }
     return NextResponse.json({ error: 'An internal server error occurred.' }, { status: 500 });
   }

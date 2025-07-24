@@ -5,7 +5,7 @@ import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
 import { auth } from '@/lib/firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
-import { getUserProfile, createUserProfile, updateUserProfile } from '@/lib/firestoreUtils';
+import { getUserProfile, createUserProfile } from '@/lib/firestoreUtils';
 import DiscordIntegration from '@/components/DiscordIntegration';
 
 interface DiscordProfile {
@@ -66,8 +66,12 @@ const RiotIntegration = ({ profile, setProfile }: { profile: UserProfile | null,
       setProfile({ ...profile!, puuid: data.puuid, leagueIGN: gameName, hashtag: tagLine });
       setSuccess(true);
 
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('An unknown error occurred.');
+      }
     } finally {
       setLoading(false);
     }
@@ -139,7 +143,6 @@ export default function ProfilePage() {
   const [activeTab, setActiveTab] = useState('profile');
 
   const roleOptions = ["Top", "Jungle", "Mid", "ADC", "Support"];
-  const [lanes, setLanes] = useState<string[]>([]);
 
   useEffect(() => {
     const fetchProfileAndSetSession = async () => {
