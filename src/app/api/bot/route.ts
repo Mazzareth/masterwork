@@ -9,35 +9,30 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const channelId = process.env.DISCORD_CHANNEL_ID;
-  const botToken = process.env.DISCORD_BOT_TOKEN;
+  const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
 
-  if (!channelId || !botToken) {
+  if (!webhookUrl) {
     return NextResponse.json(
-      { error: 'Server configuration error: Missing Discord credentials.' },
+      { error: 'Server configuration error: Missing Discord Webhook URL.' },
       { status: 500 }
     );
   }
-
-  const discordApiUrl = `https://discord.com/api/v10/channels/${channelId}/messages`;
 
   try {
     const { displayName } = await req.json();
     const content = `${displayName} has just updated their profile! Check it out.`;
 
-    const response = await fetch(discordApiUrl, {
+    const response = await fetch(webhookUrl, {
       method: 'POST',
       headers: {
-        'Authorization': `Bot ${botToken}`,
         'Content-Type': 'application/json',
-        'User-Agent': 'DiscordBot (https://www.masterwork.app, v1.0.0)',
       },
       body: JSON.stringify({ content }),
     });
 
     if (!response.ok) {
-      const errorData = await response.json();
-      console.error('Error from Discord API:', errorData);
+      const errorData = await response.text(); // Webhook errors might not be JSON
+      console.error('Error from Discord Webhook:', errorData);
       return NextResponse.json(
         { error: 'Failed to send message to Discord.' },
         { status: response.status }
