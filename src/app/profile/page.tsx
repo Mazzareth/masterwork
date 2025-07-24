@@ -117,6 +117,16 @@ export default function ProfilePage() {
     }
   };
 
+  // Update local state when profile changes (e.g., after Discord linking)
+  useEffect(() => {
+    if (profile) {
+      setLeagueIGN(profile.leagueIGN || '');
+      setHashtag(profile.hashtag || '');
+      setPrimaryRole(profile.primaryRole || '');
+      setSecondaryRole(profile.secondaryRole || '');
+    }
+  }, [profile]);
+
   if (loading) {
     return (
       <div className="min-h-screen bg-base-100 flex items-center justify-center">
@@ -375,7 +385,7 @@ export default function ProfilePage() {
                 exit={{ opacity: 0, y: -20 }}
                 transition={{ duration: 0.3 }}
               >
-                <DiscordIntegration />
+                <DiscordIntegration profile={profile} />
               </motion.div>
             )}
           </AnimatePresence>
