@@ -15,6 +15,11 @@ interface IOSPointerProps {
 const POINTER_SIZE = 10;
 const GHOST_POINTER_SIZE = 24;
 
+/**
+ * @description A component that creates an iOS-style pointer that follows the user's cursor and morphs to fit interactive elements.
+ * @param {IOSPointerProps} props - The props for the component.
+ * @returns {React.ReactElement | null} The rendered component, or null if it's not enabled or mounted.
+ */
 export default function IOSPointer({
   springConfig = { damping: 25, stiffness: 700, mass: 0.5 },
 }: IOSPointerProps) {

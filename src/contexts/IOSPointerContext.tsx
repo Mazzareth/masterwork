@@ -15,6 +15,11 @@ interface IOSPointerProviderProps {
   defaultEnabled?: boolean;
 }
 
+/**
+ * @description Provides the IOSPointerContext to its children.
+ * @param {IOSPointerProviderProps} props - The props for the component.
+ * @returns {React.ReactElement} The rendered component.
+ */
 export function IOSPointerProvider({
   children,
   defaultEnabled = true,
@@ -39,6 +44,11 @@ export function IOSPointerProvider({
   );
 }
 
+/**
+ * @description A hook to access the IOSPointerContext.
+ * @returns {IOSPointerContextType} The IOS pointer context.
+ * @throws Will throw an error if used outside of an IOSPointerProvider.
+ */
 export function useIOSPointer() {
   const context = useContext(IOSPointerContext);
   if (context === undefined) {

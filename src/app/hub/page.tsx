@@ -58,7 +58,7 @@ export default function HubPage() {
   useEffect(() => {
     const interval = setInterval(() => {
       setCurrentFunStat((prev) => (prev + 1) % mockFunStats.length);
-    }, 3000); // Rotate every 3 seconds
+    }, 3000);
     return () => clearInterval(interval);
   }, []);
 

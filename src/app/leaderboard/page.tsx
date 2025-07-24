@@ -3,10 +3,8 @@
 import { motion } from 'framer-motion';
 import Image from 'next/image';
 
-// Mock data
 const mockLeaderboard = [
   { rank: 1, name: 'ForgeMaster', lp: 2000, avatar: '/file.svg' },
-  // Add more up to 10 or so
 ];
 
 export default function LeaderboardPage() {

@@ -1,1 +1,3 @@
-// Vercel serverless function for Discord bot interactions
+/**
+ * @description Vercel serverless function for Discord bot interactions.
+ */

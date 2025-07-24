@@ -19,6 +19,11 @@ interface UserProfile {
   secondaryRole?: string;
 }
 
+/**
+ * @description Retrieves a user profile from Firestore.
+ * @param {string} uid - The user's unique ID.
+ * @returns {Promise<UserProfile | null>} The user's profile, or null if it doesn't exist.
+ */
 export const getUserProfile = async (uid: string): Promise<UserProfile | null> => {
   const docRef = doc(db, 'users', uid);
   const docSnap = await getDoc(docRef);
@@ -30,11 +35,22 @@ export const getUserProfile = async (uid: string): Promise<UserProfile | null> =
   }
 };
 
+/**
+ * @description Creates a new user profile in Firestore.
+ * @param {UserProfile} userProfile - The user profile object.
+ * @returns {Promise<void>}
+ */
 export const createUserProfile = async (userProfile: UserProfile): Promise<void> => {
   const docRef = doc(db, 'users', userProfile.uid);
   await setDoc(docRef, userProfile, { merge: true });
 };
 
+/**
+ * @description Updates a user profile in Firestore.
+ * @param {string} uid - The user's unique ID.
+ * @param {Partial<UserProfile>} data - The data to update.
+ * @returns {Promise<void>}
+ */
 export const updateUserProfile = async (uid: string, data: Partial<UserProfile>): Promise<void> => {
   const docRef = doc(db, 'users', uid);
   await setDoc(docRef, data, { merge: true });

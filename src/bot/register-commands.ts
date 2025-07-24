@@ -10,6 +10,9 @@ const commands = [pingCommand, helloCommand];
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_BOT_TOKEN!);
 
+/**
+ * @description Registers the application's slash commands with Discord.
+ */
 (async () => {
   try {
     console.log('Started refreshing application (/) commands.');

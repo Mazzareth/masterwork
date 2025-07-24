@@ -16,12 +16,18 @@ const mockTeams: Team[] = [
   { id: '2', name: 'Steel Wolves' }
 ];
 
+/**
+ * @description The main navigation bar for the application.
+ * @returns {React.ReactElement} The rendered navigation bar.
+ */
 export default function Navbar() {
   const [userTeams] = useState<Team[]>(mockTeams); // Mock user teams
   const { user, logout, loading } = useAuth();
   const pathname = usePathname();
 
-  // This effect can be used to close dropdowns on navigation if needed in the future.
+    /**
+   * @description This effect can be used to close dropdowns on navigation if needed in the future.
+   */
   useEffect(() => {
     // Example: document.activeElement.blur();
   }, [pathname]);

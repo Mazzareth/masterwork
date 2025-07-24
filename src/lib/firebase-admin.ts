@@ -1,5 +1,9 @@
 import * as admin from 'firebase-admin';
 
+/**
+ * @description Initializes the Firebase Admin SDK if it hasn't been already.
+ * @throws Will throw an error if the Firebase Admin SDK fails to initialize.
+ */
 if (!admin.apps.length) {
   try {
     admin.initializeApp({
@@ -14,5 +18,12 @@ if (!admin.apps.length) {
   }
 }
 
+/**
+ * @description Firebase Admin Authentication instance.
+ */
 export const auth = admin.auth();
+
+/**
+ * @description Firebase Admin Firestore instance.
+ */
 export const db = admin.firestore();

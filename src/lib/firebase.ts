@@ -11,22 +11,32 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID
 };
 
-// Initialize Firebase
+/**
+ * @description Initializes Firebase.
+ */
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firebase Authentication and get a reference to the service
+/**
+ * @description Firebase Authentication instance.
+ */
 export const auth = getAuth(app);
 
-// Set persistence to local
+/**
+ * @description Sets the browser's persistence to local.
+ */
 setPersistence(auth, browserLocalPersistence)
   .catch((error) => {
     console.error("Error setting auth persistence", error);
   });
 
-// Initialize Google Auth Provider
+/**
+ * @description Google Auth Provider instance.
+ */
 export const googleProvider = new GoogleAuthProvider();
 
-// Initialize Cloud Firestore and get a reference to the service
+/**
+ * @description Cloud Firestore instance.
+ */
 export const db = getFirestore(app);
 
 export default app;
