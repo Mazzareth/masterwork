@@ -89,13 +89,12 @@ export async function POST(req: Request) {
         const body: {
             displayName?: string;
             bio?: string;
-            lanes?: string[];
             leagueIGN?: string;
             hashtag?: string;
             primaryRole?: string;
             secondaryRole?: string;
         } = await req.json();
-        const { displayName, bio, lanes, leagueIGN, hashtag, primaryRole, secondaryRole } = body;
+        const { displayName, bio, leagueIGN, hashtag, primaryRole, secondaryRole } = body;
 
         // 3. Save to Firestore
         const userDocRef = db.collection('users').doc(uid);
@@ -108,7 +107,6 @@ export async function POST(req: Request) {
         const profileData: {
             displayName?: string;
             bio?: string;
-            lanes?: string[];
             leagueIGN?: string;
             hashtag?: string;
             primaryRole?: string;
@@ -120,9 +118,6 @@ export async function POST(req: Request) {
         }
         if (body.hasOwnProperty('bio')) {
             profileData.bio = bio;
-        }
-        if (body.hasOwnProperty('lanes')) {
-            profileData.lanes = lanes;
         }
         if (body.hasOwnProperty('leagueIGN')) {
             profileData.leagueIGN = leagueIGN;
@@ -144,9 +139,13 @@ export async function POST(req: Request) {
         // 4. Handle Discord role update side-effect
         const discordId = userDoc.data()?.discordProfile?.id;
 
-        if (discordId && Array.isArray(lanes)) {
+        const rolesToUpdate = [primaryRole, secondaryRole]
+            .filter((role): role is string => typeof role === 'string' && role.length > 0)
+            .map(role => role.toLowerCase());
+
+        if (discordId && rolesToUpdate.length > 0) {
             try {
-                await updateDiscordMemberRoles(discordId, lanes);
+                await updateDiscordMemberRoles(discordId, rolesToUpdate);
             } catch (error) {
                 // Log the error but don't fail the entire request, as the primary
                 // profile update to Firestore was successful.

@@ -85,12 +85,11 @@ export default function ProfilePage() {
   const handleSaveProfile = async () => {
     if (user && profile) {
       const idToken = await user.getIdToken();
-      const updatedData: Partial<UserProfile> & { lanes?: string[] } = {
+      const updatedData: Partial<UserProfile> = {
         leagueIGN,
         hashtag,
         primaryRole,
         secondaryRole,
-        lanes: [primaryRole.toLowerCase(), secondaryRole.toLowerCase()].filter(Boolean),
       };
 
       try {
