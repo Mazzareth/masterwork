@@ -86,8 +86,16 @@ export async function POST(req: Request) {
         const { uid } = decodedToken;
 
         // 2. Parse request body
-        const body = await req.json();
-        const { displayName, bio, lanes } = body;
+        const body: {
+            displayName?: string;
+            bio?: string;
+            lanes?: string[];
+            leagueIGN?: string;
+            hashtag?: string;
+            primaryRole?: string;
+            secondaryRole?: string;
+        } = await req.json();
+        const { displayName, bio, lanes, leagueIGN, hashtag, primaryRole, secondaryRole } = body;
 
         // 3. Save to Firestore
         const userDocRef = db.collection('users').doc(uid);
@@ -97,7 +105,15 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: 'User not found.' }, { status: 404 });
         }
 
-        const profileData: { [key: string]: any } = {};
+        const profileData: {
+            displayName?: string;
+            bio?: string;
+            lanes?: string[];
+            leagueIGN?: string;
+            hashtag?: string;
+            primaryRole?: string;
+            secondaryRole?: string;
+        } = {};
         // Use `hasOwnProperty` to allow setting fields to null or empty strings
         if (body.hasOwnProperty('displayName')) {
             profileData.displayName = displayName;
@@ -107,6 +123,18 @@ export async function POST(req: Request) {
         }
         if (body.hasOwnProperty('lanes')) {
             profileData.lanes = lanes;
+        }
+        if (body.hasOwnProperty('leagueIGN')) {
+            profileData.leagueIGN = leagueIGN;
+        }
+        if (body.hasOwnProperty('hashtag')) {
+            profileData.hashtag = hashtag;
+        }
+        if (body.hasOwnProperty('primaryRole')) {
+            profileData.primaryRole = primaryRole;
+        }
+        if (body.hasOwnProperty('secondaryRole')) {
+            profileData.secondaryRole = secondaryRole;
         }
 
         if (Object.keys(profileData).length > 0) {
@@ -131,10 +159,16 @@ export async function POST(req: Request) {
             success: true,
             message: 'Profile updated successfully.',
         });
-    } catch (error: any) {
+    } catch (error) {
         console.error('Profile update error:', error);
 
-        if (error.code?.startsWith('auth/')) {
+        if (
+            typeof error === 'object' &&
+            error !== null &&
+            'code' in error &&
+            typeof (error as { code: unknown }).code === 'string' &&
+            (error as { code: string }).code.startsWith('auth/')
+        ) {
             return NextResponse.json({ error: 'Authentication failed.' }, { status: 401 });
         }
 

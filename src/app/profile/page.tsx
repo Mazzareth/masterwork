@@ -38,6 +38,7 @@ export default function ProfilePage() {
   const [activeTab, setActiveTab] = useState('profile');
 
   const roleOptions = ["Top", "Jungle", "Mid", "ADC", "Support"];
+  const [lanes, setLanes] = useState<string[]>([]);
 
   useEffect(() => {
     const fetchProfileAndSetSession = async () => {
@@ -83,14 +84,25 @@ export default function ProfilePage() {
 
   const handleSaveProfile = async () => {
     if (user && profile) {
-      const updatedData: Partial<UserProfile> = {
+      const idToken = await user.getIdToken();
+      const updatedData: Partial<UserProfile> & { lanes?: string[] } = {
         leagueIGN,
         hashtag,
         primaryRole,
         secondaryRole,
+        lanes: [primaryRole.toLowerCase(), secondaryRole.toLowerCase()].filter(Boolean),
       };
+
       try {
-        await updateUserProfile(user.uid, updatedData);
+        await fetch('/api/profile', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${idToken}`,
+          },
+          body: JSON.stringify(updatedData),
+        });
+
         setProfile({ ...profile, ...updatedData });
 
         // Notify discord channel of profile update
@@ -104,7 +116,6 @@ export default function ProfilePage() {
           });
         } catch (botError) {
           console.error('Failed to send Discord notification:', botError);
-          // We can decide if we want to show a specific error for this
         }
 
         setToast({ show: true, message: 'Profile updated successfully!', type: 'success' });
@@ -259,6 +270,7 @@ export default function ProfilePage() {
             <div className="tabs tabs-boxed bg-base-200/80 backdrop-blur-sm shadow-2xl border border-primary/20">
               {[ 
                 { key: 'profile', label: 'Profile' },
+                { key: 'preferences', label: 'Preferences' },
                 { key: 'integrations', label: 'Integrations' }
               ].map((tab) => (
                 <motion.a
@@ -386,6 +398,53 @@ export default function ProfilePage() {
                 transition={{ duration: 0.3 }}
               >
                 <DiscordIntegration profile={profile} />
+              </motion.div>
+            )}
+
+            {activeTab === 'preferences' && (
+              <motion.div
+                key="preferences"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                transition={{ duration: 0.3 }}
+                className="card bg-base-200/80 backdrop-blur-sm shadow-2xl border border-primary/30"
+              >
+                <div className="card-body">
+                  <h2 className="card-title text-2xl text-primary mb-4">Role Preferences</h2>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="form-control w-full">
+                      <label className="label">
+                        <span className="label-text text-base-content/80">Primary Role</span>
+                      </label>
+                      <select 
+                        className="select select-primary w-full bg-base-100/50" 
+                        value={primaryRole}
+                        onChange={(e) => setPrimaryRole(e.target.value)}
+                      >
+                        <option disabled value="">Select Primary Role</option>
+                        {roleOptions.map(role => (
+                          <option key={`primary-${role}`} value={role}>{role}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="form-control w-full">
+                      <label className="label">
+                        <span className="label-text text-base-content/80">Secondary Role</span>
+                      </label>
+                      <select 
+                        className="select select-secondary w-full bg-base-100/50" 
+                        value={secondaryRole}
+                        onChange={(e) => setSecondaryRole(e.target.value)}
+                      >
+                        <option disabled value="">Select Secondary Role</option>
+                        {roleOptions.map(role => (
+                          <option key={`secondary-${role}`} value={role}>{role}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </div>
               </motion.div>
             )}
           </AnimatePresence>
