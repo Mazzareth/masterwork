@@ -63,7 +63,12 @@ const RiotIntegration = ({ profile, setProfile }: { profile: UserProfile | null,
         throw new Error(data.error || 'Failed to link account.');
       }
 
-      setProfile({ ...profile!, puuid: data.puuid, leagueIGN: gameName, hashtag: tagLine });
+      // The API now handles saving the PUUID and other details.
+      // We just need to refresh the profile data from Firestore to get the updated info.
+      if (user) {
+        const updatedProfile = await getUserProfile(user.uid);
+        setProfile(updatedProfile);
+      }
       setSuccess(true);
 
     } catch (err: unknown) {
@@ -89,7 +94,7 @@ const RiotIntegration = ({ profile, setProfile }: { profile: UserProfile | null,
         {profile?.puuid ? (
           <div className="text-center">
             <p className="text-success font-bold">Account Linked!</p>
-            <p>PUUID: {profile.puuid.substring(0, 15)}...</p>
+            <p>Riot ID: {profile.leagueIGN}#{profile.hashtag}</p>
           </div>
         ) : (
           <div>
@@ -135,8 +140,7 @@ export default function ProfilePage() {
   const [user] = useAuthState(auth);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [leagueIGN, setLeagueIGN] = useState('');
-  const [hashtag, setHashtag] = useState('');
+
   const [primaryRole, setPrimaryRole] = useState('');
   const [secondaryRole, setSecondaryRole] = useState('');
   const [toast, setToast] = useState<{ show: boolean; message: string; type: 'success' | 'error' }>({ show: false, message: '', type: 'success' });
@@ -165,8 +169,7 @@ export default function ProfilePage() {
         const userProfile = await getUserProfile(user.uid);
         if (userProfile) {
           setProfile(userProfile);
-          setLeagueIGN(userProfile.leagueIGN || '');
-          setHashtag(userProfile.hashtag || '');
+
           setPrimaryRole(userProfile.primaryRole || '');
           setSecondaryRole(userProfile.secondaryRole || '');
         } else {
@@ -190,8 +193,6 @@ export default function ProfilePage() {
     if (user && profile) {
       const idToken = await user.getIdToken();
       const updatedData: Partial<UserProfile> = {
-        leagueIGN,
-        hashtag,
         primaryRole,
         secondaryRole,
       };
@@ -234,8 +235,7 @@ export default function ProfilePage() {
   // Update local state when profile changes (e.g., after Discord linking)
   useEffect(() => {
     if (profile) {
-      setLeagueIGN(profile.leagueIGN || '');
-      setHashtag(profile.hashtag || '');
+
       setPrimaryRole(profile.primaryRole || '');
       setSecondaryRole(profile.secondaryRole || '');
     }
@@ -400,6 +400,52 @@ export default function ProfilePage() {
 
           {/* Tab Content */}
           <AnimatePresence mode="wait">
+            {activeTab === 'preferences' && (
+              <motion.div
+                key="preferences"
+                initial={{ opacity: 0, x: -100, rotateY: -90 }}
+                animate={{ opacity: 1, x: 0, rotateY: 0 }}
+                exit={{ opacity: 0, x: 100, rotateY: 90 }}
+                transition={{ duration: 0.8, type: "spring", stiffness: 100 }}
+                className="card bg-base-200/80 backdrop-blur-sm shadow-2xl border border-primary/30"
+              >
+                <div className="card-body">
+                  <h2 className="card-title text-3xl text-primary mb-6">Gameplay Preferences</h2>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="form-control w-full">
+                      <label className="label">
+                        <span className="label-text text-lg">Primary Role</span>
+                      </label>
+                      <select 
+                        className="select select-bordered select-lg w-full" 
+                        value={primaryRole} 
+                        onChange={(e) => setPrimaryRole(e.target.value)}
+                      >
+                        <option disabled value="">Select a role</option>
+                        {roleOptions.map(role => <option key={role} value={role}>{role}</option>)}
+                      </select>
+                    </div>
+                    <div className="form-control w-full">
+                      <label className="label">
+                        <span className="label-text text-lg">Secondary Role</span>
+                      </label>
+                      <select 
+                        className="select select-bordered select-lg w-full" 
+                        value={secondaryRole} 
+                        onChange={(e) => setSecondaryRole(e.target.value)}
+                      >
+                        <option disabled value="">Select a role</option>
+                        {roleOptions.filter(r => r !== primaryRole).map(role => <option key={role} value={role}>{role}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="card-actions justify-end mt-8">
+                    <button className="btn btn-primary btn-lg" onClick={handleSaveProfile}>Save Preferences</button>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
             {activeTab === 'profile' && (
               <motion.div
                 key="profile"

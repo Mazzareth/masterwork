@@ -1,24 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth, db } from '@/lib/firebase-admin';
+import { RiotApi, Constants } from 'twisted';
 
 /**
  * @description Handles the request to check a Riot account and save the PUUID.
  * @param {NextRequest} req - The incoming Next.js request.
  * @returns {Promise<NextResponse>} A Next.js response.
  */
-interface RiotAccount {
-  puuid: string;
-  gameName: string;
-  tagLine: string;
-}
-
-interface RiotApiError {
-  status: {
-    message: string;
-    status_code: number;
-  };
-}
-
 interface FirebaseError extends Error {
   code: string;
 }
@@ -45,41 +33,43 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'gameName and tagLine are required.' }, { status: 400 });
     }
 
-    // 3. Call Riot API
+    // 3. Call Riot API using twisted
     const riotApiKey = process.env.RIOT_API_KEY;
     if (!riotApiKey) {
       console.error('RIOT_API_KEY is not set.');
       return NextResponse.json({ error: 'Server configuration error.' }, { status: 500 });
     }
 
-    const riotApiUrl = `https://americas.api.riotgames.com/riot/account/v1/accounts/by-riot-id/${encodeURIComponent(gameName)}/${encodeURIComponent(tagLine)}?api_key=${riotApiKey}`;
-
-    const riotResponse = await fetch(riotApiUrl);
-
-    if (!riotResponse.ok) {
-      const errorData: RiotApiError = await riotResponse.json();
-      console.error('Riot API error:', errorData);
-      return NextResponse.json({ error: 'Failed to fetch account from Riot API.', details: errorData }, { status: riotResponse.status });
-    }
-
-    const riotData: RiotAccount = await riotResponse.json();
-    const { puuid } = riotData;
+    const api = new RiotApi(riotApiKey);
+    const accountResponse = await api.Account.getByRiotId(gameName, tagLine, Constants.RegionGroups.AMERICAS);
+    const { puuid } = accountResponse.response;
 
     if (!puuid) {
-      return NextResponse.json({ error: 'PUUID not found in Riot API response.' }, { status: 404 });
+        return NextResponse.json({ error: 'PUUID not found in Riot API response.' }, { status: 404 });
     }
 
-    // 4. Save PUUID to Firestore
-    const userDocRef = db.collection('users').doc(uid);
-    await userDocRef.set({ puuid: puuid, leagueIGN: gameName, hashtag: tagLine }, { merge: true });
+    // 4. Get Account Name from PUUID
+    const accountByPuuid = await api.Account.getByPUUID(puuid, Constants.RegionGroups.AMERICAS);
 
-    // 5. Return success response
-    return NextResponse.json({ success: true, puuid: puuid });
+    // 5. Save PUUID and Riot ID to Firestore
+    const userDocRef = db.collection('users').doc(uid);
+    await userDocRef.set({ 
+      puuid: puuid, 
+      leagueIGN: accountByPuuid.response.gameName,
+      hashtag: accountByPuuid.response.tagLine
+    }, { merge: true });
+
+    // 6. Return success response
+    return NextResponse.json({ success: true });
 
   } catch (error) {
     console.error('Riot API route error:', error);
     if (isFirebaseError(error) && (error.code === 'auth/session-cookie-expired' || error.code === 'auth/session-cookie-revoked')) {
       return NextResponse.json({ error: 'Session expired, please log in again.' }, { status: 401 });
+    }
+    // Handle errors from the twisted library
+    if (error instanceof Error) {
+        return NextResponse.json({ error: 'Failed to fetch account from Riot API.', details: error.message }, { status: 500 });
     }
     return NextResponse.json({ error: 'An internal server error occurred.' }, { status: 500 });
   }
