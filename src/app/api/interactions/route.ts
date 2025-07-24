@@ -27,7 +27,22 @@ export async function POST(req: Request) {
     return new Response(JSON.stringify({ type: InteractionResponseType.PONG }), { status: 200 });
   } 
 
-  // Handle other interaction types here
-  console.log('Acknowledging other interaction.');
-  return NextResponse.json({ type: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE });
+  if (body.type === InteractionType.APPLICATION_COMMAND) {
+    switch (body.data.name) {
+      case 'ping':
+        console.log('Handling ping command');
+        return NextResponse.json({
+            type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+            data: {
+                content: 'Pong!',
+            },
+        });
+      default:
+        console.error('Unknown command');
+        return new NextResponse('Unknown command', { status: 400 });
+    }
+  }
+
+  console.error('Unknown interaction type');
+  return new NextResponse('Unknown interaction type', { status: 400 });
 }
