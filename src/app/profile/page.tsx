@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { auth } from '@/lib/firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { getUserProfile, createUserProfile, updateUserProfile } from '@/lib/firestoreUtils';
+import DiscordIntegration from '@/components/DiscordIntegration';
 
 interface DiscordProfile {
   id: string;
@@ -91,6 +92,21 @@ export default function ProfilePage() {
       try {
         await updateUserProfile(user.uid, updatedData);
         setProfile({ ...profile, ...updatedData });
+
+        // Notify discord channel of profile update
+        try {
+          await fetch('/api/bot', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ displayName: profile.displayName || 'A player' }),
+          });
+        } catch (botError) {
+          console.error('Failed to send Discord notification:', botError);
+          // We can decide if we want to show a specific error for this
+        }
+
         setToast({ show: true, message: 'Profile updated successfully!', type: 'success' });
         setTimeout(() => setToast({ show: false, message: '', type: 'success' }), 3000);
       } catch (error) {
@@ -233,9 +249,7 @@ export default function ProfilePage() {
             <div className="tabs tabs-boxed bg-base-200/80 backdrop-blur-sm shadow-2xl border border-primary/20">
               {[ 
                 { key: 'profile', label: 'Profile' },
-                { key: 'integrations', label: 'Integrations' },
-                { key: 'preferences', label: 'Preferences' },
-                { key: 'settings', label: 'Settings' }
+                { key: 'integrations', label: 'Integrations' }
               ].map((tab) => (
                 <motion.a
                   key={tab.key}
@@ -356,224 +370,12 @@ export default function ProfilePage() {
             {activeTab === 'integrations' && (
               <motion.div
                 key="integrations"
-                initial={{ opacity: 0, y: 100, scale: 0.8 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -100, scale: 0.8 }}
-                transition={{ duration: 0.8, type: "spring", stiffness: 100 }}
-                className="max-w-4xl mx-auto space-y-8"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                transition={{ duration: 0.3 }}
               >
-                {/* Connected Accounts Header */}
-                <motion.div 
-                  className="text-center mb-8"
-                  initial={{ opacity: 0, y: -50 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.2 }}
-                >
-                  <h2 className="text-4xl font-bold text-primary mb-2">Connected Accounts</h2>
-                  <div className="w-24 h-1 bg-gradient-to-r from-primary to-secondary mx-auto rounded-full" />
-                </motion.div>
-
-                {/* League of Legends Integration */}
-                <motion.div 
-                  className="mockup-window bg-base-200 border border-primary/30 shadow-2xl"
-                  whileHover={{ scale: 1.02 }}
-                  transition={{ type: "spring", stiffness: 300 }}
-                >
-                  <div className="bg-base-300 px-8 py-6">
-                    <div className="flex items-center justify-between mb-6">
-                      <div className="flex items-center space-x-4">
-                        <div className="w-12 h-12 bg-gradient-to-br from-accent to-secondary rounded-xl flex items-center justify-center">
-                          <span className="text-2xl">🎮</span>
-                        </div>
-                        <h3 className="text-2xl font-bold text-accent">League of Legends</h3>
-                      </div>
-                      <div className="badge badge-success badge-lg">Connected</div>
-                    </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="form-control">
-                        <label className="label">
-                          <span className="label-text font-bold text-accent">Summoner Name</span>
-                        </label>
-                        <motion.input
-                          type="text"
-                          placeholder="Enter your IGN"
-                          className="input input-bordered input-accent w-full bg-base-100/50 backdrop-blur-sm"
-                          value={leagueIGN}
-                          onChange={(e) => setLeagueIGN(e.target.value)}
-                          whileFocus={{ scale: 1.02, boxShadow: '0 0 20px rgba(229, 90, 43, 0.3)' }}
-                        />
-                      </div>
-                      
-                      <div className="form-control">
-                        <label className="label">
-                          <span className="label-text font-bold text-accent">Hashtag</span>
-                        </label>
-                        <motion.input
-                          type="text"
-                          placeholder="#NA1"
-                          className="input input-bordered input-accent w-full bg-base-100/50 backdrop-blur-sm"
-                          value={hashtag}
-                          onChange={(e) => setHashtag(e.target.value)}
-                          whileFocus={{ scale: 1.02, boxShadow: '0 0 20px rgba(229, 90, 43, 0.3)' }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </motion.div>
-
-                {/* Discord Integration */}
-                <motion.div 
-                  className="mockup-window bg-base-200 border border-info/30 shadow-2xl"
-                  whileHover={{ scale: 1.02 }}
-                  transition={{ type: "spring", stiffness: 300 }}
-                >
-                  <div className="bg-base-300 px-8 py-6">
-                    <div className="flex items-center justify-between mb-6">
-                      <div className="flex items-center space-x-4">
-                        <div className="w-12 h-12 bg-gradient-to-br from-info to-primary rounded-xl flex items-center justify-center">
-                          <span className="text-2xl">💬</span>
-                        </div>
-                        <h3 className="text-2xl font-bold text-info">Discord</h3>
-                      </div>
-                      {profile?.discordProfile ? (
-                        <div className="badge badge-success badge-lg">Connected</div>
-                      ) : (
-                        <div className="badge badge-warning badge-lg">Not Connected</div>
-                      )}
-                    </div>
-                    
-                    {profile?.discordProfile ? (
-                      <motion.div 
-                        className="flex items-center space-x-4 p-4 bg-base-100/30 rounded-2xl backdrop-blur-sm border border-info/20"
-                        initial={{ scale: 0.9 }}
-                        animate={{ scale: 1 }}
-                        whileHover={{ scale: 1.02 }}
-                      >
-                        <div className="avatar">
-                          <div className="w-16 rounded-full ring ring-info ring-offset-base-100 ring-offset-2">
-                            <Image 
-                              src={`https://cdn.discordapp.com/avatars/${profile.discordProfile.id}/${profile.discordProfile.avatar}.png`} 
-                              alt="Discord Avatar" 
-                              width={64} 
-                              height={64} 
-                            />
-                          </div>
-                        </div>
-                        <div className="flex-1">
-                          <p className="font-bold text-lg text-info">{profile.discordProfile.username}</p>
-                          <p className="text-base-content/70">Connected to Masterwork</p>
-                        </div>
-                        <motion.button 
-                          className="btn btn-error btn-sm"
-                          whileHover={{ scale: 1.1 }}
-                          whileTap={{ scale: 0.9 }}
-                        >
-                          Unlink
-                        </motion.button>
-                      </motion.div>
-                    ) : (
-                      <motion.a 
-                        href="/api/auth/discord" 
-                        className="btn btn-info btn-lg w-full"
-                        whileHover={{ scale: 1.05, boxShadow: '0 0 30px rgba(255, 179, 102, 0.4)' }}
-                        whileTap={{ scale: 0.95 }}
-                      >
-                        <span className="mr-2">🔗</span>
-                        Connect Discord
-                      </motion.a>
-                    )}
-                  </div>
-                </motion.div>
-              </motion.div>
-            )}
-
-            {activeTab === 'preferences' && (
-              <motion.div
-                key="preferences"
-                initial={{ opacity: 0, rotateX: -90 }}
-                animate={{ opacity: 1, rotateX: 0 }}
-                exit={{ opacity: 0, rotateX: 90 }}
-                transition={{ duration: 0.8, type: "spring", stiffness: 100 }}
-                className="max-w-4xl mx-auto"
-              >
-                <div className="card bg-base-200/80 backdrop-blur-sm shadow-2xl border border-warning/30">
-                  <div className="card-body">
-                    <motion.h3 
-                      className="text-3xl font-bold text-warning mb-8 text-center"
-                      animate={{ textShadow: ['0 0 10px rgba(255, 140, 66, 0.5)', '0 0 20px rgba(255, 140, 66, 0.8)', '0 0 10px rgba(255, 140, 66, 0.5)'] }}
-                      transition={{ duration: 2, repeat: Infinity }}
-                    >
-                      Role Preferences
-                    </motion.h3>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                      {/* Primary Role */}
-                      <div className="form-control">
-                        <label className="label">
-                          <span className="label-text text-xl font-bold text-warning">Primary Role</span>
-                        </label>
-                        <motion.select 
-                          className="select select-warning select-lg w-full bg-base-100/50 backdrop-blur-sm"
-                          value={primaryRole}
-                          onChange={(e) => setPrimaryRole(e.target.value)}
-                          whileFocus={{ scale: 1.02, boxShadow: '0 0 20px rgba(255, 140, 66, 0.3)' }}
-                        >
-                          <option value="">Select Primary Role</option>
-                          {roleOptions.map((role) => (
-                            <option key={role} value={role}>{role}</option>
-                          ))}
-                        </motion.select>
-                      </div>
-                      
-                      {/* Secondary Role */}
-                      <div className="form-control">
-                        <label className="label">
-                          <span className="label-text text-xl font-bold text-warning">Secondary Role</span>
-                        </label>
-                        <motion.select 
-                          className="select select-warning select-lg w-full bg-base-100/50 backdrop-blur-sm"
-                          value={secondaryRole}
-                          onChange={(e) => setSecondaryRole(e.target.value)}
-                          whileFocus={{ scale: 1.02, boxShadow: '0 0 20px rgba(255, 140, 66, 0.3)' }}
-                        >
-                          <option value="">Select Secondary Role</option>
-                          {roleOptions.filter(r => r !== primaryRole).map((role) => (
-                            <option key={role} value={role}>{role}</option>
-                          ))}
-                        </motion.select>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </motion.div>
-            )}
-
-            {activeTab === 'settings' && (
-              <motion.div
-                key="settings"
-                initial={{ opacity: 0, y: 50, scale: 0.9 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 50, scale: 0.9 }}
-                transition={{ duration: 0.8, type: "spring", stiffness: 100 }}
-                className="max-w-4xl mx-auto"
-              >
-                <div className="card bg-base-200/80 backdrop-blur-sm shadow-2xl border border-secondary/30">
-                  <div className="card-body">
-                    <motion.h3 
-                      className="text-3xl font-bold text-secondary mb-8 text-center"
-                      animate={{ textShadow: ['0 0 10px rgba(255, 140, 66, 0.5)', '0 0 20px rgba(255, 140, 66, 0.8)', '0 0 10px rgba(255, 140, 66, 0.5)'] }}
-                      transition={{ duration: 2, repeat: Infinity }}
-                    >
-                      Interface Settings
-                    </motion.h3>
-                    <div className="form-control max-w-md mx-auto">
-                      <a href="/settings" className="btn btn-primary">
-                        Go to Settings
-                      </a>
-                    </div>
-                  </div>
-                </div>
+                <DiscordIntegration />
               </motion.div>
             )}
           </AnimatePresence>
