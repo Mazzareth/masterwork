@@ -1,5 +1,13 @@
 import { NextResponse } from 'next/server';
 
+// Handle GET requests to this endpoint
+export async function GET() {
+  return NextResponse.json(
+    { message: 'This endpoint only accepts POST requests.' },
+    { status: 405, headers: { Allow: 'POST' } }
+  );
+}
+
 export async function POST(req: Request) {
   const channelId = process.env.DISCORD_CHANNEL_ID;
   const botToken = process.env.DISCORD_BOT_TOKEN;
@@ -22,6 +30,7 @@ export async function POST(req: Request) {
       headers: {
         'Authorization': `Bot ${botToken}`,
         'Content-Type': 'application/json',
+        'User-Agent': 'DiscordBot (https://www.masterwork.app, v1.0.0)',
       },
       body: JSON.stringify({ content }),
     });
