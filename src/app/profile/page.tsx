@@ -235,7 +235,6 @@ export default function ProfilePage() {
   // Update local state when profile changes (e.g., after Discord linking)
   useEffect(() => {
     if (profile) {
-
       setPrimaryRole(profile.primaryRole || '');
       setSecondaryRole(profile.secondaryRole || '');
     }
@@ -370,7 +369,8 @@ export default function ProfilePage() {
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: 0.3, duration: 0.8 }}
           >
-            <div className="tabs tabs-boxed bg-base-200/80 backdrop-blur-sm shadow-2xl border border-primary/20">
+            {/* FIX: Added p-1 and gap-2 for better spacing */}
+            <div className="tabs tabs-boxed bg-base-200/80 backdrop-blur-sm shadow-2xl border border-primary/20 p-1 gap-2">
               {[ 
                 { key: 'profile', label: 'Profile' },
                 { key: 'preferences', label: 'Preferences' },
@@ -546,59 +546,15 @@ export default function ProfilePage() {
                 exit={{ opacity: 0, y: -20 }}
                 transition={{ duration: 0.3 }}
               >
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                   <DiscordIntegration profile={profile} />
                   <RiotIntegration profile={profile} setProfile={setProfile} />
                 </div>
               </motion.div>
             )}
 
-            {activeTab === 'preferences' && (
-              <motion.div
-                key="preferences"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                transition={{ duration: 0.3 }}
-                className="card bg-base-200/80 backdrop-blur-sm shadow-2xl border border-primary/30"
-              >
-                <div className="card-body">
-                  <h2 className="card-title text-2xl text-primary mb-4">Role Preferences</h2>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="form-control w-full">
-                      <label className="label">
-                        <span className="label-text text-base-content/80">Primary Role</span>
-                      </label>
-                      <select 
-                        className="select select-primary w-full bg-base-100/50" 
-                        value={primaryRole}
-                        onChange={(e) => setPrimaryRole(e.target.value)}
-                      >
-                        <option disabled value="">Select Primary Role</option>
-                        {roleOptions.map(role => (
-                          <option key={`primary-${role}`} value={role}>{role}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="form-control w-full">
-                      <label className="label">
-                        <span className="label-text text-base-content/80">Secondary Role</span>
-                      </label>
-                      <select 
-                        className="select select-secondary w-full bg-base-100/50" 
-                        value={secondaryRole}
-                        onChange={(e) => setSecondaryRole(e.target.value)}
-                      >
-                        <option disabled value="">Select Secondary Role</option>
-                        {roleOptions.map(role => (
-                          <option key={`secondary-${role}`} value={role}>{role}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                </div>
-              </motion.div>
-            )}
+            {/* FIX: Removed the entire duplicated 'preferences' block from here */}
+
           </AnimatePresence>
 
           {/* Save Button */}
