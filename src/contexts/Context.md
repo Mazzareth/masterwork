@@ -32,3 +32,4 @@
 ## Type Safety (2025-09)
 - UserDoc timestamps now typed as Timestamp; removed any usage.
 - Write payloads to Firestore avoid explicit type annotations so serverTimestamp() is accepted without any; see [src/contexts/AuthContext.tsx](src/contexts/AuthContext.tsx).
+- Unsubscribe handle is typed as Unsubscribe and initialized to a no-op function to guarantee it is always callable; this prevents “Type 'never' has no call signatures” during builds. See [src/contexts/AuthContext.tsx](src/contexts/AuthContext.tsx).

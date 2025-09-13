@@ -3,7 +3,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { auth, googleProvider, db } from "../lib/firebase";
 import { onAuthStateChanged, signInWithPopup, signOut, User } from "firebase/auth";
-import { doc, getDoc, onSnapshot, serverTimestamp, setDoc, Timestamp } from "firebase/firestore";
+import { doc, getDoc, onSnapshot, serverTimestamp, setDoc, Timestamp, Unsubscribe } from "firebase/firestore";
 
 export type Permissions = {
   zzq: boolean;
@@ -54,14 +54,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     // Local subscription handle for user doc
-    let unsubDoc: (() => void) | null = null;
+    let unsubDoc: Unsubscribe = () => {};
     // Watch auth state
     const unsubAuth = onAuthStateChanged(auth, async (u) => {
       // Tear down any existing user doc subscription when auth state changes
-      if (unsubDoc) {
-        try { unsubDoc(); } catch (_) {}
-        unsubDoc = null;
-      }
+      try { unsubDoc(); } catch {} finally { unsubDoc = () => {}; }
       setUser(u);
       if (!u) {
         setProfile(null);
@@ -101,9 +98,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
 
       // Live subscribe to user document for permission changes
-      if (unsubDoc) {
-        try { unsubDoc(); } catch (_) {}
-      }
+      try { unsubDoc(); } catch {}
       unsubDoc = onSnapshot(
         userRef,
         (docSnap) => {
@@ -123,9 +118,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     return () => {
       unsubAuth();
-      if (unsubDoc) {
-        try { unsubDoc(); } catch (_) {}
-      }
+      try { unsubDoc(); } catch {}
     };
   }, []);
 
