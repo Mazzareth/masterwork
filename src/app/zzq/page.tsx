@@ -102,6 +102,38 @@ export default function ZZQPage() {
   const [selected, setSelected] = useState<Client | null>(null);
   const [paneOpen, setPaneOpen] = useState(false);
 
+  // Client composer (promptless inline flow)
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [composeText, setComposeText] = useState("");
+  const composeInputRef = useRef<HTMLInputElement | null>(null);
+  const [flashClientId, setFlashClientId] = useState<string | null>(null);
+
+  const parsedClient = useMemo(() => {
+    const raw = composeText || "";
+    // capture last @username token if present
+    const match = raw.match(/(?:^|[\s,])@([A-Za-z0-9._-]{2,32})\b/);
+    const username = match ? `@${match[1]}` : null;
+    const displayName = raw.replace(/\s*@([A-Za-z0-9._-]{2,32})\b/g, "").trim();
+    return { displayName, username };
+  }, [composeText]);
+
+  // Project composer (inside Client View)
+  const [projectComposeOpen, setProjectComposeOpen] = useState(false);
+  const [projectComposeText, setProjectComposeText] = useState("");
+  const projectComposeInputRef = useRef<HTMLInputElement | null>(null);
+  const [flashProjectId, setFlashProjectId] = useState<string | null>(null);
+
+  // Note composer (inside Client View → Notes)
+  const [noteComposeOpen, setNoteComposeOpen] = useState(false);
+  const [noteComposeText, setNoteComposeText] = useState("");
+  const [noteComposeProjectId, setNoteComposeProjectId] = useState<string | null>(null);
+  const noteComposeInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Commission panel note composer (project-scoped)
+  const [commissionNoteComposeOpen, setCommissionNoteComposeOpen] = useState(false);
+  const [commissionNoteComposeText, setCommissionNoteComposeText] = useState("");
+  const commissionNoteComposeInputRef = useRef<HTMLInputElement | null>(null);
+
   // Projects
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
@@ -130,24 +162,89 @@ export default function ZZQPage() {
   useEffect(() => {
     if (projectPaneOpen) setTimeout(() => projectCloseRef.current?.focus(), 0);
   }, [projectPaneOpen]);
+  useEffect(() => {
+    if (composeOpen) setTimeout(() => composeInputRef.current?.focus(), 0);
+  }, [composeOpen]);
+  useEffect(() => {
+    if (projectComposeOpen)
+      setTimeout(() => projectComposeInputRef.current?.focus(), 0);
+  }, [projectComposeOpen]);
+  useEffect(() => {
+    if (noteComposeOpen)
+      setTimeout(() => noteComposeInputRef.current?.focus(), 0);
+  }, [noteComposeOpen]);
+  useEffect(() => {
+    if (commissionNoteComposeOpen)
+      setTimeout(() => commissionNoteComposeInputRef.current?.focus(), 0);
+  }, [commissionNoteComposeOpen]);
 
-  // Keyboard UX: Ctrl/Cmd+K to focus search, Esc to close panels (commission -> client)
+  // Keyboard UX:
+  // - Ctrl/Cmd+K: focus search
+  // - Ctrl/Cmd+N: open Client Quick Add
+  // - Ctrl/Cmd+Shift+N: open Project Quick Add (when a client is open)
+  // - Ctrl/Cmd+Shift+M: open Note Quick Add (when a client is open)
+  // - Esc: close Note Composer → Project Composer → Client Composer → Commission → Client
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const isModK = (e.key === "k" || e.key === "K") && (e.metaKey || e.ctrlKey);
+      const isMod = e.metaKey || e.ctrlKey;
+      const k = e.key;
+      const isModK = (k === "k" || k === "K") && isMod;
+      const isModN = (k === "n" || k === "N") && isMod && !e.shiftKey;
+      const isModShiftN = (k === "n" || k === "N") && isMod && e.shiftKey;
+      const isModShiftM = (k === "m" || k === "M") && isMod && e.shiftKey;
+
       if (isModK) {
         e.preventDefault();
         searchRef.current?.focus();
         return;
       }
+      if (isModN) {
+        e.preventDefault();
+        setComposeOpen(true);
+        setTimeout(() => composeInputRef.current?.focus(), 0);
+        return;
+      }
+      if (isModShiftN && paneOpen && selected) {
+        e.preventDefault();
+        setProjectComposeOpen(true);
+        setTimeout(() => projectComposeInputRef.current?.focus(), 0);
+        return;
+      }
+      if (isModShiftM && paneOpen && selected) {
+        e.preventDefault();
+        const defaultPid = selectedProjectId ?? (projects[0]?.id ?? null);
+        setNoteComposeProjectId(defaultPid);
+        setNoteComposeOpen(true);
+        setTimeout(() => noteComposeInputRef.current?.focus(), 0);
+        return;
+      }
       if (e.key === "Escape") {
-        if (projectPaneOpen) setSelectedProjectId(null);
-        else if (paneOpen) setPaneOpen(false);
+        if (commissionNoteComposeOpen) {
+          setCommissionNoteComposeOpen(false);
+          return;
+        }
+        if (noteComposeOpen) {
+          setNoteComposeOpen(false);
+          return;
+        }
+        if (projectComposeOpen) {
+          setProjectComposeOpen(false);
+          return;
+        }
+        if (composeOpen) {
+          setComposeOpen(false);
+          return;
+        }
+        if (projectPaneOpen) {
+          setSelectedProjectId(null);
+          return;
+        }
+        if (paneOpen) setPaneOpen(false);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [paneOpen, projectPaneOpen]);
+  }, [paneOpen, projectPaneOpen, composeOpen, projectComposeOpen, noteComposeOpen, commissionNoteComposeOpen, selected, selectedProjectId, projects]);
 
   // Live clients
   useEffect(() => {
@@ -301,20 +398,130 @@ export default function ZZQPage() {
   }, [dq, clients]);
 
   // Actions
-  const addClient = async () => {
+  const submitCompose = async () => {
     if (!user) return;
-    const displayName = prompt("Client name (e.g., Mazzy)");
+    const displayName = parsedClient.displayName.trim();
+    const username = parsedClient.username;
     if (!displayName) return;
-    const username = prompt("Discord username (e.g., @mazzy)") || null;
     const col = collection(db, "users", user.uid, "sites", "zzq", "clients");
-    await addDoc(col, {
+    const docRef = await addDoc(col, {
       displayName,
       username,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
+    // Optimistic select + open panel with a subtle flash highlight
+    const newClient: Client = {
+      id: docRef.id,
+      displayName,
+      username,
+      createdAt: undefined,
+      updatedAt: undefined,
+    };
+    setSelected(newClient);
+    setPaneOpen(true);
+    setComposeOpen(false);
+    setComposeText("");
+    setFlashClientId(docRef.id);
+    setTimeout(
+      () => setFlashClientId((cur) => (cur === docRef.id ? null : cur)),
+      1200
+    );
   };
-
+  
+  const submitProjectCompose = async () => {
+    if (!user || !selected) return;
+    const title = projectComposeText.trim();
+    if (!title) return;
+    const col = collection(
+      db,
+      "users",
+      user.uid,
+      "sites",
+      "zzq",
+      "clients",
+      selected.id,
+      "projects"
+    );
+    const docRef = await addDoc(col, {
+      title,
+      status: "pending",
+      completion: 0,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    // Open commission panel for the new project and flash the list row
+    setSelectedProjectId(docRef.id);
+    setProjectComposeOpen(false);
+    setProjectComposeText("");
+    setFlashProjectId(docRef.id);
+    setTimeout(
+      () => setFlashProjectId((cur) => (cur === docRef.id ? null : cur)),
+      1200
+    );
+  };
+  
+  const submitNoteCompose = async () => {
+    if (!user || !selected) return;
+    const text = noteComposeText.trim();
+    if (!text) return;
+    let pid = noteComposeProjectId;
+    if (!pid) {
+      if (selectedProjectId) pid = selectedProjectId;
+      else if (projects.length === 1) pid = projects[0].id;
+      else if (projects.length > 1) pid = projects[0].id;
+    }
+    if (!pid) return;
+    const colRef = collection(
+      db,
+      "users",
+      user.uid,
+      "sites",
+      "zzq",
+      "clients",
+      selected.id,
+      "projects",
+      pid,
+      "notes"
+    );
+    const docRef = await addDoc(colRef, {
+      text,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    setNoteComposeOpen(false);
+    setNoteComposeText("");
+    // Open the project and focus the created note
+    openProjectByIdAndFocusNote(pid, docRef.id);
+  };
+  
+  const submitCommissionNoteCompose = async () => {
+    if (!user || !selected || !selectedProjectId) return;
+    const text = commissionNoteComposeText.trim();
+    if (!text) return;
+    const colRef = collection(
+      db,
+      "users",
+      user.uid,
+      "sites",
+      "zzq",
+      "clients",
+      selected.id,
+      "projects",
+      selectedProjectId,
+      "notes"
+    );
+    const docRef = await addDoc(colRef, {
+      text,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    setCommissionNoteComposeOpen(false);
+    setCommissionNoteComposeText("");
+    // Scroll to the newly created note in the open commission panel
+    setScrollTargetNoteId(docRef.id);
+  };
+  
   const addProject = async () => {
     if (!user || !selected) return;
     const title = prompt("Project title");
@@ -568,11 +775,14 @@ export default function ZZQPage() {
                 <span className="text-gradient">Clients</span>
               </h2>
               <button
-                onClick={addClient}
+                onClick={() => {
+                  setComposeOpen((v) => !v);
+                  if (!composeOpen) setTimeout(() => composeInputRef.current?.focus(), 0);
+                }}
                 className="px-2.5 py-1.5 rounded-md bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white text-sm hover:opacity-95 active:scale-[.98] transition"
-                title="Add client"
+                title={composeOpen ? "Cancel adding client" : "Add client"}
               >
-                + Add
+                {composeOpen ? "Cancel" : "+ Add"}
               </button>
             </div>
             <div className="mt-3 relative">
@@ -585,6 +795,60 @@ export default function ZZQPage() {
                 aria-label="Search clients"
               />
             </div>
+
+            {composeOpen && (
+              <div className="mt-3 rounded-lg border border-cyan-500/40 bg-white/[0.03] p-3">
+                <div className="text-[11px] text-slate-400 mb-1">Quick add client</div>
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={composeInputRef}
+                    value={composeText}
+                    onChange={(e) => setComposeText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        submitCompose();
+                      } else if (e.key === "Escape") {
+                        e.preventDefault();
+                        setComposeOpen(false);
+                      }
+                    }}
+                    placeholder="Type: Name @username (optional)"
+                    className="flex-1 rounded-md border border-white/10 bg-white/[0.05] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-cyan-400/60 placeholder:text-slate-500"
+                    aria-label="New client quick add"
+                  />
+                  <button
+                    onClick={submitCompose}
+                    disabled={!parsedClient.displayName}
+                    className={cx(
+                      "px-3 py-2 rounded-md text-sm transition",
+                      parsedClient.displayName
+                        ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white hover:opacity-95 active:scale-[.98]"
+                        : "bg-white/[0.06] text-slate-400 cursor-not-allowed"
+                    )}
+                    title="Create client"
+                  >
+                    Create
+                  </button>
+                </div>
+                <div className="mt-2 text-[11px] text-slate-400">
+                  {parsedClient.displayName ? (
+                    <>
+                      <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 bg-white/[0.06] border border-white/10 mr-2">
+                        Name: <span className="text-slate-200">{parsedClient.displayName}</span>
+                      </span>
+                      {parsedClient.username && (
+                        <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 bg-white/[0.06] border border-white/10">
+                          {parsedClient.username}
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <span>Hint: “Mazzy @mazzy”</span>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="overflow-y-auto h-[calc(100vh-98px)] p-2 space-y-2">
@@ -611,7 +875,9 @@ export default function ZZQPage() {
                     className={cx(
                       "w-full text-left rounded-lg border border-white/10 bg-white/[0.03] hover:border-cyan-400/50 hover:bg-white/[0.05] active:scale-[.99] transition",
                       selected?.id === c.id &&
-                        "border-cyan-500/60 shadow-[0_0_0_1px_rgba(34,211,238,.35)_inset]"
+                        "border-cyan-500/60 shadow-[0_0_0_1px_rgba(34,211,238,.35)_inset]",
+                      flashClientId === c.id &&
+                        "ring-1 ring-cyan-400/60 shadow-[0_0_0_1px_rgba(34,211,238,.35)_inset]"
                     )}
                     title={`Open ${c.displayName}`}
                     aria-pressed={selected?.id === c.id}
@@ -690,12 +956,53 @@ export default function ZZQPage() {
                       <div className="p-3 border-b border-white/10 flex items-center justify-between bg-white/[0.02]">
                         <h3 className="font-medium">Projects</h3>
                         <button
-                          onClick={addProject}
+                          onClick={() => {
+                            setProjectComposeOpen((v) => !v);
+                            if (!projectComposeOpen)
+                              setTimeout(() => projectComposeInputRef.current?.focus(), 0);
+                          }}
                           className="px-2 py-1 rounded-md bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white text-sm hover:opacity-95 active:scale-[.98] transition"
+                          title={projectComposeOpen ? "Cancel adding project" : "Add project"}
                         >
-                          + Add
+                          {projectComposeOpen ? "Cancel" : "+ Add"}
                         </button>
                       </div>
+                      {projectComposeOpen && (
+                        <div className="px-3 pt-3">
+                          <div className="flex items-center gap-2">
+                            <input
+                              ref={projectComposeInputRef}
+                              value={projectComposeText}
+                              onChange={(e) => setProjectComposeText(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  submitProjectCompose();
+                                } else if (e.key === "Escape") {
+                                  e.preventDefault();
+                                  setProjectComposeOpen(false);
+                                }
+                              }}
+                              placeholder="Project title"
+                              className="w-full rounded-md border border-white/10 bg-white/[0.05] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-cyan-400/60 placeholder:text-slate-500"
+                              aria-label="New project title"
+                            />
+                            <button
+                              onClick={submitProjectCompose}
+                              disabled={!projectComposeText.trim()}
+                              className={cx(
+                                "px-3 py-2 rounded-md text-sm transition",
+                                projectComposeText.trim()
+                                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white hover:opacity-95 active:scale-[.98]"
+                                  : "bg-white/[0.06] text-slate-400 cursor-not-allowed"
+                              )}
+                              title="Create project"
+                            >
+                              Create
+                            </button>
+                          </div>
+                        </div>
+                      )}
                       <ul className="divide-y divide-white/10">
                         {projectsLoading && projects.length === 0 ? (
                           <>
@@ -709,7 +1016,10 @@ export default function ZZQPage() {
                           projects.map((p) => (
                             <li
                               key={p.id}
-                              className="p-3 flex items-center gap-3"
+                              className={cx(
+                                "p-3 flex items-center gap-3 rounded-md",
+                                flashProjectId === p.id && "ring-1 ring-cyan-400/60 bg-white/[0.04]"
+                              )}
                             >
                               <input
                                 type="checkbox"
@@ -758,12 +1068,83 @@ export default function ZZQPage() {
                       <div className="p-3 border-b border-white/10 flex items-center justify-between bg-white/[0.02]">
                         <h3 className="font-medium">Notes</h3>
                         <button
-                          onClick={addNote}
+                          onClick={() => {
+                            setNoteComposeOpen((v) => !v);
+                            if (!noteComposeOpen) {
+                              const defaultPid = selectedProjectId ?? (projects[0]?.id ?? null);
+                              setNoteComposeProjectId(defaultPid);
+                              setTimeout(() => noteComposeInputRef.current?.focus(), 0);
+                            }
+                          }}
                           className="px-2 py-1 rounded-md bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white text-sm hover:opacity-95 active:scale-[.98] transition"
+                          title={noteComposeOpen ? "Cancel adding note" : "Add note"}
                         >
-                          + Add
+                          {noteComposeOpen ? "Cancel" : "+ Add"}
                         </button>
                       </div>
+                      {noteComposeOpen && (
+                        <div className="px-3 pt-3">
+                          <div className="flex items-center gap-2">
+                            {projects.length > 1 ? (
+                              <select
+                                value={noteComposeProjectId ?? ""}
+                                onChange={(e) => setNoteComposeProjectId(e.target.value || null)}
+                                className="rounded-md border border-white/10 bg-white/[0.05] px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-cyan-400/60"
+                                aria-label="Select project for new note"
+                              >
+                                {projects.map((p) => (
+                                  <option key={p.id} value={p.id}>
+                                    {p.title}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : projects.length === 1 ? (
+                              <div className="text-[11px] text-slate-400">
+                                Project: <span className="text-slate-300">{projects[0].title}</span>
+                              </div>
+                            ) : (
+                              <div className="text-[11px] text-slate-400">
+                                Create a project first to add notes.
+                              </div>
+                            )}
+                          </div>
+                          <div className="mt-2 flex items-center gap-2">
+                            <input
+                              ref={noteComposeInputRef}
+                              value={noteComposeText}
+                              onChange={(e) => setNoteComposeText(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  submitNoteCompose();
+                                } else if (e.key === "Escape") {
+                                  e.preventDefault();
+                                  setNoteComposeOpen(false);
+                                }
+                              }}
+                              placeholder="Note text"
+                              className="flex-1 rounded-md border border-white/10 bg-white/[0.05] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-cyan-400/60 placeholder:text-slate-500"
+                              aria-label="New note text"
+                            />
+                            <button
+                              onClick={submitNoteCompose}
+                              disabled={
+                                !noteComposeText.trim() ||
+                                (projects.length > 1 && !noteComposeProjectId)
+                              }
+                              className={cx(
+                                "px-3 py-2 rounded-md text-sm transition",
+                                noteComposeText.trim() && (projects.length === 1 || noteComposeProjectId)
+                                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white hover:opacity-95 active:scale-[.98]"
+                                  : "bg-white/[0.06] text-slate-400 cursor-not-allowed"
+                              )}
+                              title="Create note"
+                            >
+                              Create
+                            </button>
+                          </div>
+                        </div>
+                      )}
                       <ul className="divide-y divide-white/10">
                         {projectsLoading && aggregatedNotes.length === 0 ? (
                           <>
@@ -910,12 +1291,54 @@ export default function ZZQPage() {
                       <div className="flex items-center justify-between mb-2">
                         <label className="text-sm font-medium">Notes</label>
                         <button
-                          onClick={() => addProjectNote(selectedProjectId)}
+                          onClick={() => {
+                            setCommissionNoteComposeOpen((v) => !v);
+                            if (!commissionNoteComposeOpen) {
+                              setTimeout(() => commissionNoteComposeInputRef.current?.focus(), 0);
+                            }
+                          }}
                           className="px-2 py-1 rounded-md bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white text-xs hover:opacity-95 active:scale-[.98] transition"
+                          title={commissionNoteComposeOpen ? "Cancel adding note" : "Add note"}
                         >
-                          + Add
+                          {commissionNoteComposeOpen ? "Cancel" : "+ Add"}
                         </button>
                       </div>
+                      {commissionNoteComposeOpen && (
+                        <div className="mb-2">
+                          <div className="flex items-center gap-2">
+                            <input
+                              ref={commissionNoteComposeInputRef}
+                              value={commissionNoteComposeText}
+                              onChange={(e) => setCommissionNoteComposeText(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  submitCommissionNoteCompose();
+                                } else if (e.key === "Escape") {
+                                  e.preventDefault();
+                                  setCommissionNoteComposeOpen(false);
+                                }
+                              }}
+                              placeholder="Note text"
+                              className="flex-1 rounded-md border border-white/10 bg-white/[0.05] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-cyan-400/60 placeholder:text-slate-500"
+                              aria-label="New note text (commission)"
+                            />
+                            <button
+                              onClick={submitCommissionNoteCompose}
+                              disabled={!commissionNoteComposeText.trim()}
+                              className={cx(
+                                "px-3 py-2 rounded-md text-xs transition",
+                                commissionNoteComposeText.trim()
+                                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white hover:opacity-95 active:scale-[.98]"
+                                  : "bg-white/[0.06] text-slate-400 cursor-not-allowed"
+                              )}
+                              title="Create note"
+                            >
+                              Create
+                            </button>
+                          </div>
+                        </div>
+                      )}
                       <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-1">
                         {(projectNotes[selectedProjectId] ?? []).map((n) => {
                           const flash = n.id === flashNoteId;

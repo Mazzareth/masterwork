@@ -11,19 +11,32 @@
   - Client cards show:
     - Display name (primary)
     - Discord username (secondary, italic, subdued)
-  - Add Client button (prompt-based for speed).
+  - Quick Add composer (promptless):
+    - Toggle with the header button or Ctrl/Cmd+N.
+    - Single-line parse: “Name @username” → displayName + optional username chip.
+    - Enter to create, Esc to cancel. On create, the new client is auto-selected and highlighted.
 - Client View (slides in from the right, keeps clients list visible):
   - Header: Client name + username, Close button.
   - Two columns:
-    - Projects: list with quick-complete checkbox; Add Project via prompt.
+    - Projects: list with quick-complete checkbox.
+      - Quick Add composer (promptless) in the Projects panel:
+        - Toggle with the “+ Add” button or Ctrl/Cmd+Shift+N when a client is open.
+        - Enter to create, Esc to cancel. New project auto-opens in the Commission panel and briefly highlights in the list.
       - Click a project to open the Commission panel.
-    - Notes: aggregated list across all projects; Add Note via prompt.
+    - Notes: aggregated list across all projects.
+      - Quick Add composer (promptless) in the Notes panel:
+        - Toggle with the “+ Add” button or Ctrl/Cmd+Shift+M when a client is open.
+        - Choose project (if multiple), type note text, Enter to create, Esc to cancel.
+        - On create, the project opens in the Commission panel and the new note is auto-scrolled and highlighted.
       - Clicking a note opens its project’s Commission panel and auto-scrolls/highlights the note; edits happen inline there.
 - Commission panel (nested slide-out from the right):
   - Live-bound fields:
     - Title (inline editable)
     - Status (Pending / In Progress / Completed)
     - Completion (0–100% slider)
+  - Notes Quick Add (promptless):
+    - Toggle with the “+ Add” button in the Commission panel.
+    - Enter to create, Esc to cancel. After create, auto-scrolls to the new note and highlights it.
   - Notes section fills the remaining height of the Commission panel and provides a large scroll area; inline editable textareas auto-save on blur.
 - No separate Note Edit panel; note editing is consolidated in the Commission panel’s Notes section (on-blur auto-save).
 - Designed to conserve space while keeping Clients and Client View visible.
@@ -63,8 +76,8 @@
 - Strict “Client-first” information architecture: all projects and notes are linked to a specific Client.
 - Nested slide-outs avoid deep navigation and keep context visible at all times.
 - Inline, live-updating edits reduce clicks and keep the flow fast; can be extended later with richer forms.
-- Commission panel opens only when a project is selected AND loaded (or an aggregated note is clicked). Selecting a client does not open Commission; its open state is derived from `selectedProjectId` AND `projectLive` in [ZZQPage()](src/app/zzq/page.tsx:86). The panel will not show "No commission selected" - it only appears when a project is actually available.
-- Off-canvas containment: the page wrapper also uses overflow-hidden to fully prevent horizontal scrollbars, and closed panels use pointer-events-none so they cannot intercept clicks or create accidental horizontal overflow. See [page.tsx wrapper](src/app/zzq/page.tsx:543) and panel toggles at [client panel](src/app/zzq/page.tsx:632) and [commission panel](src/app/zzq/page.tsx:787).
+- Commission panel opens only when a project is selected AND loaded (or an aggregated note is clicked). Selecting a client does not open Commission; its open state is derived from selectedProjectId AND projectLive in [src/app/zzq/page.tsx](src/app/zzq/page.tsx).
+- Off-canvas containment: the page wrapper also uses overflow-hidden to fully prevent horizontal scrollbars, and closed panels use pointer-events-none so they cannot intercept clicks or create accidental horizontal overflow. See [src/app/zzq/page.tsx](src/app/zzq/page.tsx) for panel toggles and transitions.
 
 ## Dark Theme Revamp (2025-09)
 - Visual system
@@ -74,7 +87,7 @@
   - Slide panels with ease-[var(--ease-snap)] and will-change for snappy transitions.
   - Active scale and hover states on actionable elements; focus-visible rings for keyboard users.
 - Keyboard
-  - Ctrl/Cmd+K focuses client search; Esc closes Commission → Client panels, in order.
+  - Ctrl/Cmd+K focuses client search; Ctrl/Cmd+N opens the Client Quick-Add; Ctrl/Cmd+Shift+N opens the Project Quick-Add; Ctrl/Cmd+Shift+M opens the Note Quick-Add (when a client is open); Esc closes Note Composer → Project Composer → Client Composer → Commission → Client panels, in order.
 - Performance
   - Skeleton shimmer for perceived speed; debounced search; optimistic updates for Firestore writes.
 - Accessibility
