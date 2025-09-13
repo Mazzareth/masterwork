@@ -1,0 +1,40 @@
+# Context
+
+## Overview
+- App Router root and portal hub.
+- Authentication is provided globally; the hub renders available destinations (ZZQ, CC, InHouse) based on both UI visibility toggles and Firestore permissions.
+- UI refined: top navigation with auth controls on the top-right, gradient background, and card-style links. Branding header and placeholder footer text removed.
+
+## Components
+- Layout
+  - [src/app/layout.tsx](src/app/layout.tsx)
+    - Server component that mounts the client-side AuthProvider and sets base fonts and metadata.
+- Hub (Main Page)
+  - [src/app/page.tsx](src/app/page.tsx)
+    - Client component:
+      - Top-right login/logout with avatar and display name.
+      - If signed out: centered welcome and CTA to sign in.
+      - If signed in: grid of destination cards, filtered by `pageVisibility` and Firestore `permissions`.
+      - Cards are accessible, hover-elevated, and responsive.
+- Routes (with auth/permission gates):
+  - [src/app/zzq/page.tsx](src/app/zzq/page.tsx)
+  - [src/app/cc/page.tsx](src/app/cc/page.tsx)
+  - [src/app/inhouse/page.tsx](src/app/inhouse/page.tsx)
+
+## Dependencies
+- Auth provider and hooks: [src/contexts/AuthContext.tsx](src/contexts/AuthContext.tsx)
+- UI visibility toggles: [src/config/pages.ts](src/config/pages.ts)
+
+## Design Notes
+- New users default to ZZQ-only permission; CC/InHouse disabled until enabled in Firestore.
+- The old “visibility toggles” footer line has been removed; refer to [src/config/pages.ts](src/config/pages.ts) for toggles.
+- Geist fonts are applied globally via CSS variable `--font-geist-sans`.
+- Global UI utilities (2025-09):
+  - In [src/app/globals.css](src/app/globals.css):
+    - `--ease-snap` easing var for snappy transitions.
+    - `.skeleton` shimmer and `.spinner` loader; both respect prefers-reduced-motion.
+    - `.zzq-bg` dark neon background with radial cyan/fuchsia blooms and glass base.
+    - `.text-gradient` cyan→violet→pink gradient text for headings and emphasis.
+  - Adopted in [src/app/zzq/page.tsx](src/app/zzq/page.tsx) for perceived performance, optimistic UI, focus management on slide-in panels, and the new dark theme visuals.
+  - Keyboard UX in [src/app/zzq/page.tsx](src/app/zzq/page.tsx): Ctrl/Cmd+K focuses client search; Esc closes Commission → Client. Notes are edited inline within the Commission panel, and the aggregated client Notes list navigates to and highlights the target note. The Commission Notes pane now expands to the available height using flex, replacing the previous 12rem max height cap.
+- ZZQ Commission panel opens only when a project is clicked (or an aggregated note is selected). Selecting a client does not open Commission; open state is derived from `selectedProjectId` in [ZZQPage()](src/app/zzq/page.tsx:86). The page wrapper also uses `overflow-hidden` to prevent horizontal scrollbars at [page.tsx wrapper](src/app/zzq/page.tsx:543), and closed panels use `pointer-events-none` so they cannot intercept clicks (see [client panel](src/app/zzq/page.tsx:632) and [commission panel](src/app/zzq/page.tsx:787)). Selecting a client explicitly clears any open Commission via the [onClick handler](src/app/zzq/page.tsx:587), and the Client Close button also clears Commission via its [onClick](src/app/zzq/page.tsx:654).

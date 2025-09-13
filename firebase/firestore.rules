@@ -1,0 +1,59 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // Validation helpers for top-level user profile doc
+    function hasValidProfile() {
+      return
+        (request.resource.data.profile.uid is string) &&
+        (request.resource.data.profile.email is string || request.resource.data.profile.email == null) &&
+        (request.resource.data.profile.displayName is string || request.resource.data.profile.displayName == null) &&
+        (request.resource.data.profile.photoURL is string || request.resource.data.profile.photoURL == null);
+    }
+
+    function hasValidPermissions() {
+      return
+        (request.resource.data.permissions is map) &&
+        (request.resource.data.permissions.zzq is bool) &&
+        (request.resource.data.permissions.cc is bool) &&
+        (request.resource.data.permissions.inhouse is bool);
+    }
+
+    // Users collection: each user can read/write only their own document.
+    match /users/{uid} {
+      allow create: if isOwner(uid) && hasValidPermissions() && hasValidProfile();
+      allow read: if isOwner(uid);
+      allow update: if isOwner(uid) && hasValidPermissions() && hasValidProfile();
+      allow delete: if false;
+    }
+
+    // ZZQ site-specific CRM data nested under the user's profile
+    // Structure:
+    // /users/{uid}/sites/zzq/clients/{clientId}
+    // /users/{uid}/sites/zzq/clients/{clientId}/projects/{projectId}
+    // /users/{uid}/sites/zzq/clients/{clientId}/notes/{noteId}
+    match /users/{uid}/sites/zzq/clients/{clientId} {
+      allow read, create, update, delete: if isOwner(uid);
+    }
+    match /users/{uid}/sites/zzq/clients/{clientId}/projects/{projectId} {
+      allow read, create, update, delete: if isOwner(uid);
+    }
+    match /users/{uid}/sites/zzq/clients/{clientId}/projects/{projectId}/notes/{noteId} {
+      allow read, create, update, delete: if isOwner(uid);
+    }
+    match /users/{uid}/sites/zzq/clients/{clientId}/notes/{noteId} {
+      allow read, create, update, delete: if isOwner(uid);
+    }
+
+    // Deny everything else by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
