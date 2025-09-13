@@ -21,9 +21,7 @@ export default function Home() {
 
   const visibleEntries =
     user && permissions
-      ? entries.filter(
-          (e) => pageVisibility[e.key] && Boolean((permissions as any)[e.key])
-        )
+      ? entries.filter((e) => pageVisibility[e.key] && Boolean(permissions[e.key]))
       : [];
 
   return (

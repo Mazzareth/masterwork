@@ -79,3 +79,9 @@
   - Skeleton shimmer for perceived speed; debounced search; optimistic updates for Firestore writes.
 - Accessibility
   - Managed focus on panel open; ARIA labels on controls; respects prefers-reduced-motion.
+
+## Type Safety (2025-09)
+- Replaced any with precise types:
+  - Firestore timestamps typed as Timestamp across Client/Project/Note models.
+  - Snapshot mappings cast to concrete Doc shapes instead of any merges in [src/app/zzq/page.tsx](src/app/zzq/page.tsx).
+- Removed redundant casts in aggregated note sorting; relies on Timestamp.seconds.

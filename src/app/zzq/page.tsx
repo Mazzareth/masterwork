@@ -13,14 +13,15 @@ import {
   query,
   serverTimestamp,
   updateDoc,
+  Timestamp,
 } from "firebase/firestore";
 
 type Client = {
   id: string;
   displayName: string;
   username?: string | null;
-  createdAt?: any;
-  updatedAt?: any;
+  createdAt?: Timestamp | undefined;
+  updatedAt?: Timestamp | undefined;
 };
 
 type Project = {
@@ -28,16 +29,20 @@ type Project = {
   title: string;
   status: "pending" | "in_progress" | "completed";
   completion: number;
-  createdAt?: any;
-  updatedAt?: any;
+  createdAt?: Timestamp | undefined;
+  updatedAt?: Timestamp | undefined;
 };
 
 type Note = {
   id: string;
   text: string;
-  createdAt?: any;
-  updatedAt?: any;
+  createdAt?: Timestamp | undefined;
+  updatedAt?: Timestamp | undefined;
 };
+
+type ClientDoc = Omit<Client, "id">;
+type ProjectDoc = Omit<Project, "id">;
+type NoteDoc = Omit<Note, "id">;
 
 const cx = (...cls: (string | false | null | undefined)[]) =>
   cls.filter(Boolean).join(" ");
@@ -151,7 +156,10 @@ export default function ZZQPage() {
     const col = collection(db, "users", user.uid, "sites", "zzq", "clients");
     const unsub = onSnapshot(query(col, orderBy("displayName")), (snap) => {
       const arr: Client[] = [];
-      snap.forEach((d) => arr.push({ id: d.id, ...(d.data() as any) }));
+      snap.forEach((d) => {
+        const data = d.data() as ClientDoc;
+        arr.push({ id: d.id, ...data });
+      });
       setClients(arr);
       setClientsLoading(false);
     });
@@ -180,7 +188,10 @@ export default function ZZQPage() {
     );
     const unsub = onSnapshot(query(projCol, orderBy("createdAt")), (snap) => {
       const arr: Project[] = [];
-      snap.forEach((d) => arr.push({ id: d.id, ...(d.data() as any) }));
+      snap.forEach((d) => {
+        const data = d.data() as ProjectDoc;
+        arr.push({ id: d.id, ...data });
+      });
       setProjects(arr);
       setProjectsLoading(false);
     });
@@ -202,8 +213,12 @@ export default function ZZQPage() {
       selectedProjectId
     );
     const unsub = onSnapshot(ref, (snap) => {
-      if (snap.exists()) setProjectLive({ id: snap.id, ...(snap.data() as any) });
-      else setProjectLive(null);
+      if (snap.exists()) {
+        const data = snap.data() as ProjectDoc;
+        setProjectLive({ id: snap.id, ...data });
+      } else {
+        setProjectLive(null);
+      }
     });
     return () => unsub();
   }, [user, selected, selectedProjectId]);
@@ -227,7 +242,10 @@ export default function ZZQPage() {
       );
       const unsub = onSnapshot(query(colRef, orderBy("createdAt")), (snap) => {
         const arr: Note[] = [];
-        snap.forEach((d) => arr.push({ id: d.id, ...(d.data() as any) }));
+        snap.forEach((d) => {
+          const data = d.data() as NoteDoc;
+          arr.push({ id: d.id, ...data });
+        });
         setProjectNotes((prev) => ({ ...prev, [p.id]: arr }));
       });
       unsubs.push(unsub);
@@ -265,8 +283,8 @@ export default function ZZQPage() {
       list?.forEach((n) => all.push({ ...n, projectId: pid }));
     });
     all.sort((a, b) => {
-      const ta = (a.createdAt?.seconds ?? 0) as number;
-      const tb = (b.createdAt?.seconds ?? 0) as number;
+      const ta = a.createdAt?.seconds ?? 0;
+      const tb = b.createdAt?.seconds ?? 0;
       return tb - ta;
     });
     return all;
@@ -803,9 +821,7 @@ export default function ZZQPage() {
                 <div>
                   <div className="text-lg font-semibold">Commission</div>
                   <div className="text-xs text-slate-400">
-                    {projectLive
-                      ? (projectLive.status as string).replace("_", " ")
-                      : ""}
+                    {projectLive ? projectLive.status.replace("_", " ") : ""}
                   </div>
                 </div>
                 <button

@@ -28,3 +28,7 @@
   - [src/app/zzq/page.tsx](src/app/zzq/page.tsx)
   - [src/app/cc/page.tsx](src/app/cc/page.tsx)
   - [src/app/inhouse/page.tsx](src/app/inhouse/page.tsx)
+
+## Type Safety (2025-09)
+- UserDoc timestamps now typed as Timestamp; removed any usage.
+- Write payloads to Firestore avoid explicit type annotations so serverTimestamp() is accepted without any; see [src/contexts/AuthContext.tsx](src/contexts/AuthContext.tsx).

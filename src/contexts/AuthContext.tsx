@@ -3,7 +3,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { auth, googleProvider, db } from "../lib/firebase";
 import { onAuthStateChanged, signInWithPopup, signOut, User } from "firebase/auth";
-import { doc, getDoc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
+import { doc, getDoc, onSnapshot, serverTimestamp, setDoc, Timestamp } from "firebase/firestore";
 
 export type Permissions = {
   zzq: boolean;
@@ -21,8 +21,8 @@ export type UserProfile = {
 type UserDoc = {
   profile: UserProfile;
   permissions: Permissions;
-  createdAt?: any;
-  updatedAt?: any;
+  createdAt?: Timestamp | undefined;
+  updatedAt?: Timestamp | undefined;
 };
 
 type AuthContextType = {
@@ -82,7 +82,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
       // Bootstrap or migrate user document ensuring permissions are present
       if (!snap.exists()) {
-        const newDoc: UserDoc = {
+        const newDoc = {
           profile: baseProfile,
           permissions: defaultPermissions, // Default access: ZZQ only
           createdAt: serverTimestamp(),
@@ -92,13 +92,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       } else {
         // Merge profile refresh and, if missing, permissions in a single write
         const data = snap.data() as Partial<UserDoc>;
-        const updatePayload: Partial<UserDoc> & { updatedAt: any } = {
+        const updatePayload = {
           profile: baseProfile,
           updatedAt: serverTimestamp(),
+          ...(data.permissions ? {} : { permissions: defaultPermissions }),
         };
-        if (!data.permissions) {
-          updatePayload.permissions = defaultPermissions;
-        }
         await setDoc(userRef, updatePayload, { merge: true });
       }
 
