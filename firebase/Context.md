@@ -1,34 +1,61 @@
 # Context
 
 ## Overview
-- Firestore security rules for Masterwork.app.
-- Enforces per-user access to their own document in `users/{uid}` and validates the `permissions` object structure.
-- Adds site-specific nested data for ZZQ CRM under each user: `/users/{uid}/sites/zzq/**`.
+- Firestore rules secure per-user data while enabling cross-tenant invites and chats.
+- Owner's ZZQ data remains private under their `/users/{uid}/sites/zzq/**` subtree.
+- Linked Clients use top-level canonical chats plus per-user mirrors for secure listing.
 
 ## Files
-- [firebase/firestore.rules](firebase/firestore.rules)
+- [firebase/firestore.rules](firebase/firestore.rules:1)
 
-## Rules Summary
-- Users may read their own user document: `/users/{uid}`.
-- Users may create/update their own user document only if both:
-  - `permissions` is a map containing boolean `zzq`, `cc`, and `inhouse`, and
-  - `profile` has valid shape (`uid` string; `email`, `displayName`, `photoURL` nullable strings).
-- ZZQ CRM subtree (per-user) is permitted for the owner:
-  - `/users/{uid}/sites/zzq/clients/{clientId}`
-  - `/users/{uid}/sites/zzq/clients/{clientId}/projects/{projectId}`
-  - `/users/{uid}/sites/zzq/clients/{clientId}/notes/{noteId}`
-  - All read/create/update/delete allowed only if `request.auth.uid == uid`.
-- All other reads/writes are denied by default.
+## What’s enforced (key sections)
+- Users can read/write only their own user doc:
+  - [match /users/{uid}](firebase/firestore.rules:33)
+- Owner-only ZZQ subtree:
+  - [match /users/{uid}/sites/zzq/{document=**}](firebase/firestore.rules:41)
+- Invites under owner subtree:
+  - [match /users/{ownerId}/sites/zzq/invites/{token}](firebase/firestore.rules:49)
+  - Any signed-in user may GET a specific invite if status="active" and not expired:
+    - [allow get](firebase/firestore.rules:51)
+  - Owner-only list/create/revoke:
+    - [allow list](firebase/firestore.rules:55)
+    - [allow create](firebase/firestore.rules:58)
+    - [allow update] for owner revoke or accepting user setting status="used" with usedBy=uid:
+      - (owner) [allow update](firebase/firestore.rules:64)
+      - (acceptor) [allow update](firebase/firestore.rules:68)
+    - [allow delete](firebase/firestore.rules:76)
+- Canonical chats (cross-tenant):
+  - [match /chats/{chatId}](firebase/firestore.rules:81)
+  - Create if caller is in `request.resource.data.participants`:
+    - [allow create](firebase/firestore.rules:83)
+  - Read/Update if caller is in `resource.data.participants`:
+    - [allow get, update](firebase/firestore.rules:86)
+  - Disallow global list/delete:
+    - [allow list: if false](firebase/firestore.rules:91)
+    - [allow delete: if false](firebase/firestore.rules:92)
+  - Messages derive permission from parent chat participants:
+    - [match /chats/{chatId}/messages/{messageId}](firebase/firestore.rules:95)
+    - [allow read, create](firebase/firestore.rules:96)
+- Per-user CC mirrors for secure listing:
+  - Owner’s CC chats mirror: [match /users/{ownerId}/sites/cc/chats/{chatId}](firebase/firestore.rules:104)
+  - Client’s CC chats mirror: [match /users/{uid}/sites/cc/chats/{chatId}](firebase/firestore.rules:108)
+- Per-user link mirrors:
+  - Owner link under client: [match /users/{ownerId}/sites/zzq/clients/{clientId}/links/{linkId}](firebase/firestore.rules:114)
+  - Client CC link: [match /users/{uid}/sites/cc/links/{linkId}](firebase/firestore.rules:117)
 
-## Data Model Notes (ZZQ)
-- Clients hold artist’s customers; fields include `displayName`, optional `username` (Discord handle), and timestamps.
-- Projects and Notes are always nested under a specific Client, ensuring CRM linkage to a Client.
-- The parent `sites/zzq` document is not required to exist for its subcollections to function, but can be created for metadata if desired.
+## Rationale
+- Owner-only ZZQ subtree preserves privacy; no cross-user reads.
+- Invitations live under the owner's path for owner listing; invitees can only GET by token when active.
+- Canonical chat doc ensures participant-based access control; per-user mirrors allow listing without exposing data broadly.
+- Disallowing LIST on `/chats` prevents enumeration while mirrors under `/users/{uid}/sites/cc/chats` provide user-specific lists.
 
-## Deploy
-- Firebase Console: Firestore → Rules → Paste contents of [firebase/firestore.rules](firebase/firestore.rules)
-- Or Firebase CLI:
-  - `npm i -g firebase-tools`
-  - `firebase login`
-  - `firebase use masterworkapp-qg9ri`
-  - `firebase deploy --only firestore:rules`
+## Operational notes
+- Deploy rules via Console or CLI to activate changes:
+  - Firebase CLI: `firebase deploy --only firestore:rules`
+- Rules propagation can take 30–60 seconds.
+- Indexes: Firestore may prompt for single-field indexes when ordering by `lastMessageAt` (chats mirrors) or `createdAt` (messages). Accept prompts.
+
+## References
+- Canonical chat creation path used by [acceptInvite()](src/lib/linking.ts:179)
+- Invite GET/update used by [CCLinkAcceptPage()](src/app/cc/link/page.tsx:1)
+- Mirrors for CC dashboard reading in [CCPage()](src/app/cc/page.tsx:1)

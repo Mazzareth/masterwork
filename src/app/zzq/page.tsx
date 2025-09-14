@@ -15,6 +15,16 @@ import {
   updateDoc,
   Timestamp,
 } from "firebase/firestore";
+import { where } from "firebase/firestore";
+import {
+  createInvite,
+  ensureOwnerMirrorsForUsedInvite,
+  revokeInvite,
+  unlinkLinkedUser,
+  sendChatMessage,
+  type InviteDoc,
+  type ClientLink,
+} from "../../lib/linking";
 
 type Client = {
   id: string;
@@ -133,6 +143,35 @@ export default function ZZQPage() {
   const [commissionNoteComposeOpen, setCommissionNoteComposeOpen] = useState(false);
   const [commissionNoteComposeText, setCommissionNoteComposeText] = useState("");
   const commissionNoteComposeInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Linking/invite UI
+  const [linkPanelOpen, setLinkPanelOpen] = useState(false);
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  type InviteItem = {
+    token: string;
+    status: "active" | "expired" | "used" | "revoked";
+    expiresAt?: Timestamp | null;
+    usedBy?: string | null;
+    usedAt?: Timestamp | null;
+    createdAt?: Timestamp | null;
+  };
+  const [invitesForClient, setInvitesForClient] = useState<InviteItem[]>([]);
+  type LinkItem = {
+    linkId: string;
+    userId: string;
+    createdAt?: Timestamp | null;
+  };
+  const [linksForClient, setLinksForClient] = useState<LinkItem[]>([]);
+
+  // Client chat (owner ↔ linked user) state
+  type ChatMsg = { id: string; senderId: string; text: string; createdAt?: Timestamp | undefined };
+  const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+  const [chatMessages, setChatMessages] = useState<ChatMsg[]>([]);
+  const [chatText, setChatText] = useState("");
+  const [chatBusy, setChatBusy] = useState(false);
+  const chatListRef = useRef<HTMLDivElement | null>(null);
 
   // Projects
   const [projects, setProjects] = useState<Project[]>([]);
@@ -262,6 +301,125 @@ export default function ZZQPage() {
     });
     return () => unsub();
   }, [user]);
+
+  // Observe invites and ensure owner-side mirrors are created when an invite is used
+  useEffect(() => {
+    if (!user) return;
+    const col = collection(db, "users", user.uid, "sites", "zzq", "invites");
+    const unsub = onSnapshot(col, (snap) => {
+      snap.forEach((d) => {
+        const data = d.data() as Partial<InviteDoc>;
+        if (data?.status === "used" && data?.usedBy && data.clientId) {
+          const ownerIdVal = data.ownerId ?? user.uid;
+          const clientRefVal =
+            data.clientRef ?? `/users/${ownerIdVal}/sites/zzq/clients/${data.clientId}`;
+          const full: InviteDoc = {
+            token: data.token ?? d.id,
+            ownerId: ownerIdVal,
+            clientId: data.clientId,
+            clientRef: clientRefVal,
+            clientDisplayName: data.clientDisplayName ?? "Client",
+            createdAt: data.createdAt,
+            expiresAt: data.expiresAt ?? null,
+            usedAt: data.usedAt ?? null,
+            usedBy: data.usedBy,
+            status: data.status,
+          };
+          try {
+            ensureOwnerMirrorsForUsedInvite(full);
+          } catch {
+            // best-effort; mirrors are idempotent
+          }
+        }
+      });
+    });
+    return () => unsub();
+  }, [user]);
+
+  // Live list of invites for the selected client
+  useEffect(() => {
+    if (!user || !selected) {
+      setInvitesForClient([]);
+      return;
+    }
+    const invCol = collection(db, "users", user.uid, "sites", "zzq", "invites");
+    const qInv = query(invCol, where("clientId", "==", selected.id));
+    const unsub = onSnapshot(qInv, (snap) => {
+      const arr: InviteItem[] = [];
+      snap.forEach((d) => {
+        const data = d.data() as Partial<InviteDoc>;
+        arr.push({
+          token: data.token || d.id,
+          status: data.status ?? "active",
+          expiresAt: data.expiresAt ?? null,
+          usedBy: data.usedBy ?? null,
+          usedAt: data.usedAt ?? null,
+          createdAt: data.createdAt ?? null,
+        });
+      });
+      // show most recent first
+      arr.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+      setInvitesForClient(arr);
+    });
+    return () => unsub();
+  }, [user, selected]);
+
+  // Live list of linked users for the selected client
+  useEffect(() => {
+    if (!user || !selected) {
+      setLinksForClient([]);
+      return;
+    }
+    const linksCol = collection(
+      db,
+      "users",
+      user.uid,
+      "sites",
+      "zzq",
+      "clients",
+      selected.id,
+      "links"
+    );
+    const unsub = onSnapshot(linksCol, (snap) => {
+      const arr: LinkItem[] = [];
+      snap.forEach((d) => {
+        const data = d.data() as Partial<ClientLink>;
+        if (data.userId) {
+          arr.push({
+            linkId: data.linkId || d.id,
+            userId: data.userId,
+            createdAt: data.createdAt ?? null,
+          });
+        }
+      });
+      setLinksForClient(arr);
+    });
+    return () => unsub();
+  }, [user, selected]);
+
+  // Client chat messages subscription for the selected chat
+  useEffect(() => {
+    if (!user || !selectedChatId) {
+      setChatMessages([]);
+      return;
+    }
+    const col = collection(db, "chats", selectedChatId, "messages");
+    const qy = query(col, orderBy("createdAt"));
+    const unsub = onSnapshot(qy, (snap) => {
+      const arr: ChatMsg[] = [];
+      snap.forEach((d) => {
+        const data = d.data() as Omit<ChatMsg, "id">;
+        arr.push({ id: d.id, ...data });
+      });
+      setChatMessages(arr);
+      // autoscroll to latest
+      setTimeout(() => {
+        const el = chatListRef.current;
+        if (el) el.scrollTop = el.scrollHeight;
+      }, 0);
+    });
+    return () => unsub();
+  }, [user, selectedChatId]);
 
   // Reset project panel when client changes
   useEffect(() => {
@@ -522,28 +680,6 @@ export default function ZZQPage() {
     setScrollTargetNoteId(docRef.id);
   };
   
-  const addProject = async () => {
-    if (!user || !selected) return;
-    const title = prompt("Project title");
-    if (!title) return;
-    const col = collection(
-      db,
-      "users",
-      user.uid,
-      "sites",
-      "zzq",
-      "clients",
-      selected.id,
-      "projects"
-    );
-    await addDoc(col, {
-      title,
-      status: "pending",
-      completion: 0,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-  };
 
   const openProject = (p: Project) => {
     setSelectedProjectId(p.id);
@@ -645,45 +781,6 @@ export default function ZZQPage() {
     });
   };
 
-  const addNote = async () => {
-    if (!user || !selected) return;
-    if (projects.length === 0) {
-      alert("Create a project first to add notes.");
-      return;
-    }
-    let projectId: string | null = null;
-    if (projects.length === 1) {
-      projectId = projects[0].id;
-    } else {
-      const choice = prompt(
-        "Add note to which project?\n" +
-          projects.map((p, i) => `${i + 1}. ${p.title}`).join("\n") +
-          "\nEnter number:"
-      );
-      const idx = choice ? parseInt(choice, 10) - 1 : -1;
-      projectId = idx >= 0 && idx < projects.length ? projects[idx].id : null;
-    }
-    if (!projectId) return;
-    const text = prompt("New note");
-    if (!text) return;
-    const colRef = collection(
-      db,
-      "users",
-      user.uid,
-      "sites",
-      "zzq",
-      "clients",
-      selected.id,
-      "projects",
-      projectId,
-      "notes"
-    );
-    await addDoc(colRef, {
-      text,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-  };
 
   const addProjectNote = async (projectId: string) => {
     if (!user || !selected) return;
@@ -935,21 +1032,253 @@ export default function ZZQPage() {
                       </div>
                     ) : null}
                   </div>
-                  <button
-                    ref={clientCloseRef}
-                    onClick={() => {
-                      setPaneOpen(false);
-                      // Also guarantee commission is closed when closing client pane
-                      setSelectedProjectId(null);
-                    }}
-                    className="px-3 py-1.5 rounded-md border border-white/10 hover:bg-white/[0.06] active:scale-[.98] transition focus-visible:ring-2 focus-visible:ring-cyan-400/60"
-                    title="Close"
-                  >
-                    Close
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        setLinkPanelOpen((v) => !v);
+                        setInviteUrl(null);
+                        setInviteError(null);
+                      }}
+                      className="px-3 py-1.5 rounded-md border border-cyan-500/40 text-cyan-200 hover:bg-white/[0.06] active:scale-[.98] transition"
+                      title={linkPanelOpen ? "Hide linking tools" : "Link client to CC"}
+                    >
+                      {linkPanelOpen ? "Hide Link" : "Link Client"}
+                    </button>
+                    <button
+                      ref={clientCloseRef}
+                      onClick={() => {
+                        setPaneOpen(false);
+                        // Also guarantee commission is closed when closing client pane
+                        setSelectedProjectId(null);
+                        setLinkPanelOpen(false);
+                      }}
+                      className="px-3 py-1.5 rounded-md border border-white/10 hover:bg-white/[0.06] active:scale-[.98] transition focus-visible:ring-2 focus-visible:ring-cyan-400/60"
+                      title="Close"
+                    >
+                      Close
+                    </button>
+                  </div>
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-4">
+                  {linkPanelOpen && (
+                    <div className="mb-4 rounded-lg border border-cyan-500/40 bg-white/[0.03] p-3 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="font-medium">Link this client to CC</div>
+                        <button
+                          onClick={async () => {
+                            if (!user || !selected || inviteBusy) return;
+                            setInviteBusy(true);
+                            setInviteError(null);
+                            setInviteUrl(null);
+                            try {
+                              const res = await createInvite({
+                                ownerId: user.uid,
+                                clientId: selected.id,
+                                clientDisplayName: selected.displayName,
+                              });
+                              setInviteUrl(res.url);
+                            } catch (e) {
+                              setInviteError("Failed to create invite");
+                            } finally {
+                              setInviteBusy(false);
+                            }
+                          }}
+                          className="px-3 py-1.5 rounded-md bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white text-xs hover:opacity-95 active:scale-[.98] disabled:opacity-60"
+                          disabled={inviteBusy}
+                          title="Generate invite link"
+                        >
+                          {inviteBusy ? "Generating…" : "Generate Link"}
+                        </button>
+                      </div>
+
+                      {inviteError ? <div className="text-sm text-rose-400">{inviteError}</div> : null}
+                      {inviteUrl ? (
+                        <div className="flex items-center gap-2">
+                          <input
+                            readOnly
+                            value={inviteUrl}
+                            className="flex-1 rounded-md border border-white/10 bg-white/[0.05] px-3 py-2 text-xs"
+                          />
+                          <button
+                            onClick={async () => { try { await navigator.clipboard.writeText(inviteUrl); } catch {} }}
+                            className="px-3 py-2 rounded-md border border-white/10 hover:bg-white/[0.06] text-xs"
+                            title="Copy link"
+                          >
+                            Copy
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-slate-400">
+                          Generate a link and share it with the client. When they accept, they can chat with you in CC.
+                        </div>
+                      )}
+
+                      <div className="pt-2 border-t border-white/10">
+                        <div className="text-[12px] uppercase tracking-wide text-slate-400 mb-2">Active Invites</div>
+                        <ul className="space-y-2">
+                          {invitesForClient.length > 0 ? (
+                            invitesForClient.map((inv) => (
+                              <li key={inv.token} className="flex items-center justify-between text-sm">
+                                <div className="flex items-center gap-2">
+                                  <span className="px-2 py-0.5 rounded bg-white/[0.06] border border-white/10 text-[11px]">
+                                    {inv.token.slice(0, 6)}…
+                                  </span>
+                                  <span className="text-slate-400">{inv.status}</span>
+                                  {inv.expiresAt ? (
+                                    <span className="text-slate-500 text-xs">
+                                      • expires {new Date(inv.expiresAt.toMillis()).toLocaleDateString()}
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  {inv.status === "active" ? (
+                                    <button
+                                      onClick={async () => {
+                                        if (!user) return;
+                                        try {
+                                          await revokeInvite({ ownerId: user.uid, token: inv.token });
+                                        } catch {}
+                                      }}
+                                      className="px-2 py-1 rounded-md border border-white/10 hover:bg-white/[0.06] text-xs"
+                                      title="Revoke invite"
+                                    >
+                                      Revoke
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </li>
+                            ))
+                          ) : (
+                            <li className="text-sm text-slate-500">No invites yet.</li>
+                          )}
+                        </ul>
+                      </div>
+
+                      <div className="pt-2 border-t border-white/10">
+                        <div className="text-[12px] uppercase tracking-wide text-slate-400 mb-2">Linked Users</div>
+                        <ul className="space-y-2">
+                          {linksForClient.length > 0 ? (
+                            linksForClient.map((lnk) => (
+                              <li key={lnk.linkId} className="flex items-center justify-between text-sm">
+                                <div className="flex items-center gap-2">
+                                  <span className="px-2 py-0.5 rounded bg-white/[0.06] border border-white/10 text-[11px]">
+                                    {lnk.userId.slice(0, 6)}…
+                                  </span>
+                                  <span className="text-slate-400">chat: {lnk.linkId.slice(0, 6)}…</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    onClick={() => setSelectedChatId(lnk.linkId)}
+                                    className="px-2 py-1 rounded-md border border-cyan-400/40 text-cyan-200 hover:bg-white/[0.06] text-xs"
+                                    title="Open chat with this user"
+                                  >
+                                    Chat
+                                  </button>
+                                  <button
+                                    onClick={async () => {
+                                      if (!user || !selected) return;
+                                      try {
+                                        await unlinkLinkedUser({
+                                          ownerId: user.uid,
+                                          clientId: selected.id,
+                                          userId: lnk.userId,
+                                        });
+                                      } catch {}
+                                    }}
+                                    className="px-2 py-1 rounded-md border border-white/10 hover:bg-white/[0.06] text-xs"
+                                    title="Unlink user"
+                                  >
+                                    Unlink
+                                  </button>
+                                </div>
+                              </li>
+                            ))
+                          ) : (
+                            <li className="text-sm text-slate-500">No linked users yet.</li>
+                          )}
+                        </ul>
+                      </div>
+
+                      {selectedChatId && (
+                        <div className="pt-2 border-t border-white/10">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="text-[12px] uppercase tracking-wide text-slate-400">Client Chat</div>
+                            <button
+                              onClick={() => setSelectedChatId(null)}
+                              className="px-2 py-1 rounded-md border border-white/10 hover:bg-white/[0.06] text-xs"
+                              title="Close chat"
+                            >
+                              Close
+                            </button>
+                          </div>
+                          <div
+                            ref={chatListRef}
+                            className="h-64 overflow-y-auto rounded-md border border-white/10 bg-white/[0.03] p-3 space-y-2"
+                          >
+                            {chatMessages.map((m) => {
+                              const mine = m.senderId === user?.uid;
+                              const t = m.createdAt?.toDate();
+                              const time = t
+                                ? t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                                : "";
+                              return (
+                                <div
+                                  key={m.id}
+                                  className={[
+                                    "max-w-[80%] rounded-lg px-3 py-2 text-sm shadow",
+                                    mine ? "ml-auto bg-cyan-600/80 text-white" : "mr-auto bg-white/[0.06] text-slate-100",
+                                  ].join(" ")}
+                                >
+                                  <div>{m.text || "(empty)"}</div>
+                                  <div className={["mt-1 text-[11px]", mine ? "text-cyan-100/80" : "text-slate-400"].join(" ")}>
+                                    {time}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                            {chatMessages.length === 0 && (
+                              <div className="text-sm text-slate-500">No messages yet.</div>
+                            )}
+                          </div>
+                          <div className="mt-2">
+                            <form
+                              onSubmit={(e) => {
+                                e.preventDefault();
+                                if (!user || !selectedChatId || !chatText.trim()) return;
+                                (async () => {
+                                  try {
+                                    setChatBusy(true);
+                                    const t = chatText;
+                                    setChatText("");
+                                    await sendChatMessage({ chatId: selectedChatId, senderId: user.uid, text: t });
+                                  } finally {
+                                    setChatBusy(false);
+                                  }
+                                })();
+                              }}
+                              className="flex items-center gap-2"
+                            >
+                              <input
+                                value={chatText}
+                                onChange={(e) => setChatText(e.target.value)}
+                                placeholder="Type a message…"
+                                className="flex-1 rounded-md border border-white/10 bg-white/[0.05] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-cyan-400/60 placeholder:text-slate-500"
+                              />
+                              <button
+                                disabled={!chatText.trim() || chatBusy}
+                                className="px-3 py-2 rounded-md bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white text-xs hover:opacity-95 disabled:opacity-60"
+                                type="submit"
+                                title="Send"
+                              >
+                                Send
+                              </button>
+                            </form>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {/* Projects */}
                     <section className="rounded-lg border border-white/10 bg-white/[0.03]">

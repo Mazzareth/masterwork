@@ -4,6 +4,7 @@
 - ZZQ is a focused, lightweight CRM for commissions workflow.
 - UX-first design with a persistent, scrollable, searchable Clients list on the left, a slide-in Client View, and a nested slide-out Commission panel.
 - All data is stored per-user in Firestore under the user profile in a site-specific subtree.
+- New: Client linking tools allow owners to generate invitation links that let clients chat in CC. Internal ZZQ data remains private.
 
 ## UI/Flow
 - Left panel (sticky):
@@ -16,85 +17,54 @@
     - Single-line parse: “Name @username” → displayName + optional username chip.
     - Enter to create, Esc to cancel. On create, the new client is auto-selected and highlighted.
 - Client View (slides in from the right, keeps clients list visible):
-  - Header: Client name + username, Close button.
+  - Header: Client name + username, actions: “Link Client” and “Close”.
+  - Linking panel (toggle):
+    - “Generate Link” creates an invite and shows a copyable URL.
+    - Active Invites list with “Revoke”.
+    - Linked Users list with “Chat” and “Unlink”.
+    - Inline “Client Chat” view appears when a linked user is selected:
+      - Real-time messages (owner ↔ selected linked user) from `/chats/{chatId}/messages`
+      - Send box with optimistic UI
   - Two columns:
-    - Projects: list with quick-complete checkbox.
-      - Quick Add composer (promptless) in the Projects panel:
-        - Toggle with the “+ Add” button or Ctrl/Cmd+Shift+N when a client is open.
-        - Enter to create, Esc to cancel. New project auto-opens in the Commission panel and briefly highlights in the list.
-      - Click a project to open the Commission panel.
-    - Notes: aggregated list across all projects.
-      - Quick Add composer (promptless) in the Notes panel:
-        - Toggle with the “+ Add” button or Ctrl/Cmd+Shift+M when a client is open.
-        - Choose project (if multiple), type note text, Enter to create, Esc to cancel.
-        - On create, the project opens in the Commission panel and the new note is auto-scrolled and highlighted.
-      - Clicking a note opens its project’s Commission panel and auto-scrolls/highlights the note; edits happen inline there.
+    - Projects: list with quick-complete checkbox and quick-add.
+    - Notes: aggregated list across all projects; opens Commission to edit inline.
 - Commission panel (nested slide-out from the right):
-  - Live-bound fields:
-    - Title (inline editable)
-    - Status (Pending / In Progress / Completed)
-    - Completion (0–100% slider)
-  - Notes Quick Add (promptless):
-    - Toggle with the “+ Add” button in the Commission panel.
-    - Enter to create, Esc to cancel. After create, auto-scrolls to the new note and highlights it.
-  - Notes section fills the remaining height of the Commission panel and provides a large scroll area; inline editable textareas auto-save on blur.
-- No separate Note Edit panel; note editing is consolidated in the Commission panel’s Notes section (on-blur auto-save).
-- Designed to conserve space while keeping Clients and Client View visible.
-- Color theme: Dark-first palette with neon cyan→fuchsia accents, glassmorphism (frosted panels), and high-contrast typography. Light mode gracefully degrades to a dimmed variant for visual consistency.
+  - Live-bound fields: Title, Status, Completion slider.
+  - Notes quick-add; inline editable notes with on-blur save.
 
 ## Data Model (Firestore)
 - Root: `/users/{uid}` (managed by AuthProvider bootstrap)
 - ZZQ subtree:
   - Clients: `/users/{uid}/sites/zzq/clients/{clientId}`
-    - Fields: `displayName: string`, `username?: string|null`, `createdAt`, `updatedAt`
   - Projects: `/users/{uid}/sites/zzq/clients/{clientId}/projects/{projectId}`
-    - Fields: `title: string`, `status: "pending"|"in_progress"|"completed"`, `completion: number`, timestamps
-  - Notes (per project): `/users/{uid}/sites/zzq/clients/{clientId}/projects/{projectId}/notes/{noteId}`
-    - Fields: `text: string`, timestamps
-  - Client Notes panel aggregates all notes across the client’s projects (no separate client-level notes collection required).
+  - Notes: `/users/{uid}/sites/zzq/clients/{clientId}/projects/{projectId}/notes/{noteId}`
+  - Invites (owner-only listing, token-based GET by invitees):
+    - `/users/{uid}/sites/zzq/invites/{token}` (created by owner)
+- Cross-tenant chat (separate collections; see docs):
+  - Canonical: `/chats/{chatId}` with `participants: [ownerId, userId]`
+  - Per-user summaries: `/users/{uid}/sites/cc/chats/{chatId}`
 
 ## Security
-- Only the signed-in owner can read/write their ZZQ subtree.
-- See [firebase/firestore.rules](firebase/firestore.rules) matches under `/users/{uid}/sites/zzq/**`.
+- ZZQ subtree remains owner-only (no cross-user reads).
+- Invites: owner can list; invitees can GET a specific active, non-expired token.
+- Chats/messages gated by participants; listing via per-user summaries.
 
 ## Components
 - Page: [src/app/zzq/page.tsx](src/app/zzq/page.tsx)
-  - Client-side subscriptions to Clients, Projects, Notes; single nested slide-out for Commission; notes are edited inline within Commission.
-  - Optimistic updates for project fields and note text.
-  - Keyboard UX: Ctrl/Cmd+K focuses client search; Esc closes the topmost open panel (Commission → Client).
-  - Micro-component: StatusBadge for project state chips and animated progress visualization.
-
+  - Live clients/projects/notes, commission panel, and the new client-linking panel (invite generation).
 - Styles: [src/app/globals.css](src/app/globals.css)
-  - .zzq-bg dark gradient background with subtle neon blooms.
-  - .text-gradient accent gradient for headings.
-  - Motion token: --ease-snap easing curve; skeleton and spinner animations.
+
 ## Dependencies
 - Auth: [src/contexts/AuthContext.tsx](src/contexts/AuthContext.tsx)
 - Firebase App/DB: [src/lib/firebase.ts](src/lib/firebase.ts)
+- Linking utilities: [src/lib/linking.ts](src/lib/linking.ts)
 
 ## Notes
-- Strict “Client-first” information architecture: all projects and notes are linked to a specific Client.
-- Nested slide-outs avoid deep navigation and keep context visible at all times.
-- Inline, live-updating edits reduce clicks and keep the flow fast; can be extended later with richer forms.
-- Commission panel opens only when a project is selected AND loaded (or an aggregated note is clicked). Selecting a client does not open Commission; its open state is derived from selectedProjectId AND projectLive in [src/app/zzq/page.tsx](src/app/zzq/page.tsx).
-- Off-canvas containment: the page wrapper also uses overflow-hidden to fully prevent horizontal scrollbars, and closed panels use pointer-events-none so they cannot intercept clicks or create accidental horizontal overflow. See [src/app/zzq/page.tsx](src/app/zzq/page.tsx) for panel toggles and transitions.
-
-## Dark Theme Revamp (2025-09)
-- Visual system
-  - Dark neon aesthetic using .zzq-bg and .text-gradient from [src/app/globals.css](src/app/globals.css).
-  - Glassy panels with border-white/10, backdrop-blur, and subtle inner shadow on selection.
-- Interactions and motion
-  - Slide panels with ease-[var(--ease-snap)] and will-change for snappy transitions.
-  - Active scale and hover states on actionable elements; focus-visible rings for keyboard users.
-- Keyboard
-  - Ctrl/Cmd+K focuses client search; Ctrl/Cmd+N opens the Client Quick-Add; Ctrl/Cmd+Shift+N opens the Project Quick-Add; Ctrl/Cmd+Shift+M opens the Note Quick-Add (when a client is open); Esc closes Note Composer → Project Composer → Client Composer → Commission → Client panels, in order.
-- Performance
-  - Skeleton shimmer for perceived speed; debounced search; optimistic updates for Firestore writes.
-- Accessibility
-  - Managed focus on panel open; ARIA labels on controls; respects prefers-reduced-motion.
+- Internal Projects/Notes are never exposed to CC; only minimal identity and chat flow are shared via invites.
+- Panels use `pointer-events-none` when closed to avoid intercepting clicks; overflow is managed at the page wrapper.
 
 ## Type Safety (2025-09)
-- Replaced any with precise types:
-  - Firestore timestamps typed as Timestamp across Client/Project/Note models.
-  - Snapshot mappings cast to concrete Doc shapes instead of any merges in [src/app/zzq/page.tsx](src/app/zzq/page.tsx).
-- Removed redundant casts in aggregated note sorting; relies on Timestamp.seconds.
+- Firestore timestamps typed as Timestamp across Client/Project/Note models.
+- Snapshot mappings cast to concrete Doc shapes; aggregated note sorting uses Timestamp.seconds.
+- Eliminated `any` for invites and links: casts to `Partial<InviteDoc>` and `Partial<ClientLink>` from [src/lib/linking.ts](src/lib/linking.ts).
+- React Hooks dependencies include `selected` where referenced to satisfy `react-hooks/exhaustive-deps`.

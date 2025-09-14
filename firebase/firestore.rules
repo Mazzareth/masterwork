@@ -1,14 +1,19 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // Helpers
     function isSignedIn() {
       return request.auth != null;
     }
     function isOwner(uid) {
       return isSignedIn() && request.auth.uid == uid;
     }
+    function notExpired(ts) {
+      return ts == null || request.time < ts;
+    }
 
-    // Validation helpers for top-level user profile doc
+    // Validation helpers for user profile doc (kept for compatibility)
     function hasValidProfile() {
       return
         (request.resource.data.profile.uid is string) &&
@@ -16,7 +21,6 @@ service cloud.firestore {
         (request.resource.data.profile.displayName is string || request.resource.data.profile.displayName == null) &&
         (request.resource.data.profile.photoURL is string || request.resource.data.profile.photoURL == null);
     }
-
     function hasValidPermissions() {
       return
         (request.resource.data.permissions is map) &&
@@ -25,7 +29,7 @@ service cloud.firestore {
         (request.resource.data.permissions.inhouse is bool);
     }
 
-    // Users collection: each user can read/write only their own document.
+    // Users base doc
     match /users/{uid} {
       allow create: if isOwner(uid) && hasValidPermissions() && hasValidProfile();
       allow read: if isOwner(uid);
@@ -33,11 +37,88 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // ZZQ site-specific CRM data nested under the user's profile
-    // Structure:
-    // /users/{uid}/sites/zzq/clients/{clientId}
-    // /users/{uid}/sites/zzq/clients/{clientId}/projects/{projectId}
-    // /users/{uid}/sites/zzq/clients/{clientId}/notes/{noteId}
+    // ZZQ owner-only subtree (owner may manage all their ZZQ data)
+    match /users/{uid}/sites/zzq/{document=**} {
+      allow read, write: if isOwner(uid);
+    }
+
+    // Invites (under owner subtree)
+    // Allows:
+    // - Owners to create/list/revoke their invites
+    // - Any signed-in user to GET a specific active invite by token (no LIST)
+    match /users/{ownerId}/sites/zzq/invites/{token} {
+      // Invitee preflight GET
+      allow get: if isSignedIn()
+                 && resource.data.status == "active"
+                 && notExpired(resource.data.expiresAt);
+
+      // Only the owner can list their invites
+      allow list: if isOwner(ownerId);
+
+      // Owner creates active invite
+      allow create: if isOwner(ownerId)
+        && request.resource.data.ownerId == ownerId
+        && request.resource.data.status == "active";
+
+      // Owner may revoke; accepting user may mark as used
+      allow update: if (
+        // Owner revoke/maintenance (owner cannot directly mark "used")
+        (isOwner(ownerId) && !(request.resource.data.status == "used"))
+        ||
+        // Accepting user updates to "used"
+        (isSignedIn()
+         && resource.data.status == "active"
+         && notExpired(resource.data.expiresAt)
+         && request.resource.data.status == "used"
+         && request.resource.data.usedBy == request.auth.uid)
+      );
+
+      // Owner may delete
+      allow delete: if isOwner(ownerId);
+    }
+
+    // Canonical Chats
+    match /chats/{chatId} {
+      // Create requires caller to be included in the participants array
+      allow create: if isSignedIn()
+        && (request.auth.uid in request.resource.data.participants);
+
+      // Read/Update require caller to be an existing participant
+      allow get, update: if isSignedIn()
+        && (request.auth.uid in resource.data.participants);
+
+      // Disallow chat enumeration and deletion
+      allow list: if false;
+      allow delete: if false;
+
+      // Messages under a chat (permission derived from parent chat)
+      match /messages/{messageId} {
+        allow read, create: if isSignedIn()
+          && (request.auth.uid in
+               get(/databases/$(database)/documents/chats/$(chatId)).data.participants);
+        allow update, delete: if false;
+      }
+    }
+
+    // Per-user Chat Summaries (owner and client)
+    match /users/{ownerId}/sites/cc/chats/{chatId} {
+      allow read, write, list: if isOwner(ownerId);
+      allow delete: if isOwner(ownerId);
+    }
+    match /users/{uid}/sites/cc/chats/{chatId} {
+      allow read, write, list: if isOwner(uid);
+      allow delete: if isOwner(uid);
+    }
+
+    // Per-user Link Views
+    match /users/{ownerId}/sites/zzq/clients/{clientId}/links/{linkId} {
+      allow read, write, list, delete: if isOwner(ownerId);
+    }
+    match /users/{uid}/sites/cc/links/{linkId} {
+      allow read, write, list, delete: if isOwner(uid);
+    }
+
+    // Legacy explicit ZZQ matches (redundant with the zzq/** rule above, kept for clarity)
     match /users/{uid}/sites/zzq/clients/{clientId} {
       allow read, create, update, delete: if isOwner(uid);
     }
@@ -51,7 +132,7 @@ service cloud.firestore {
       allow read, create, update, delete: if isOwner(uid);
     }
 
-    // Deny everything else by default
+    // Default deny
     match /{document=**} {
       allow read, write: if false;
     }
