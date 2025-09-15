@@ -71,11 +71,18 @@ body {
 /* ZZQ Dark theme helpers */
 .zzq-bg {
   --zzq-bg: #070b12;
+  --zzq-top-pad: max(12px, env(safe-area-inset-top));
+  padding-top: var(--zzq-top-pad);
   background-color: var(--zzq-bg);
   background-image:
     radial-gradient(600px 600px at 0% -10%, rgba(34, 211, 238, 0.16), transparent 60%),
     radial-gradient(800px 800px at 100% 110%, rgba(217, 70, 239, 0.14), transparent 60%),
     linear-gradient(180deg, rgba(2, 6, 23, 0.6), rgba(2, 6, 23, 0));
+}
+
+/* ZZQ viewport helper: ensures content height accounts for top padding */
+.zzq-viewport {
+  height: calc(100vh - var(--zzq-top-pad, 0px));
 }
 
 /* Fallback tweak in light mode to keep page visually dark for ZZQ */

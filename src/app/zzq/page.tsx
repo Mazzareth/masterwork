@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { db } from "../../lib/firebase";
 import {
@@ -14,6 +15,9 @@ import {
   serverTimestamp,
   updateDoc,
   Timestamp,
+  deleteDoc,
+  getDocs,
+  writeBatch,
 } from "firebase/firestore";
 import { where } from "firebase/firestore";
 import {
@@ -56,6 +60,13 @@ type NoteDoc = Omit<Note, "id">;
 
 const cx = (...cls: (string | false | null | undefined)[]) =>
   cls.filter(Boolean).join(" ");
+
+function parseNameUsername(raw: string) {
+  const match = raw.match(/(?:^|[\s,])@([A-Za-z0-9._-]{2,32})\b/);
+  const username = match ? `@${match[1]}` : null;
+  const displayName = raw.replace(/\s*@([A-Za-z0-9._-]{2,32})\b/g, "").trim();
+  return { displayName, username };
+}
 
 // Debounce hook for snappier inputs without re-render thrash
 function useDebounced<T>(value: T, delay = 150) {
@@ -117,15 +128,12 @@ export default function ZZQPage() {
   const [composeText, setComposeText] = useState("");
   const composeInputRef = useRef<HTMLInputElement | null>(null);
   const [flashClientId, setFlashClientId] = useState<string | null>(null);
+  // Inline client editing/deletion
+  const [editingClientId, setEditingClientId] = useState<string | null>(null);
+  const [editText, setEditText] = useState("");
+  const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null);
 
-  const parsedClient = useMemo(() => {
-    const raw = composeText || "";
-    // capture last @username token if present
-    const match = raw.match(/(?:^|[\s,])@([A-Za-z0-9._-]{2,32})\b/);
-    const username = match ? `@${match[1]}` : null;
-    const displayName = raw.replace(/\s*@([A-Za-z0-9._-]{2,32})\b/g, "").trim();
-    return { displayName, username };
-  }, [composeText]);
+  const parsedClient = useMemo(() => parseNameUsername(composeText || ""), [composeText]);
 
   // Project composer (inside Client View)
   const [projectComposeOpen, setProjectComposeOpen] = useState(false);
@@ -217,6 +225,347 @@ export default function ZZQPage() {
       setTimeout(() => commissionNoteComposeInputRef.current?.focus(), 0);
   }, [commissionNoteComposeOpen]);
 
+// Extra helpers for right-click context menu flows
+const renameProject = async (p: Project) => {
+  if (!user || !selected) return;
+  const next = prompt("Rename project", p.title);
+  if (next == null) return; // cancel
+  const title = next.trim();
+  if (!title || title === p.title) return;
+
+  // Optimistic UI
+  setProjects((prev) => prev.map((it) => (it.id === p.id ? { ...it, title } : it)));
+  setProjectLive((prev) => (prev && prev.id === p.id ? { ...prev, title } : prev));
+
+  const ref = doc(
+    db,
+    "users",
+    user.uid,
+    "sites",
+    "zzq",
+    "clients",
+    selected.id,
+    "projects",
+    p.id
+  );
+  await updateDoc(ref, { title, updatedAt: serverTimestamp() });
+};
+
+const editNoteViaPrompt = async (projectId: string, noteId: string, currentText: string) => {
+  if (!user || !selected) return;
+  const next = prompt("Edit note", currentText ?? "");
+  if (next == null) return; // cancel
+  await updateProjectNoteText(projectId, noteId, next);
+};
+
+// Rendered overlay for context menus (opened via onContextMenu handlers)
+function ContextMenuOverlay() {
+  if (!menu.open) return null;
+  if (typeof document === "undefined") return null;
+
+  // Actions
+  const doOpenClient = () => {
+    if (menu.client) {
+      setSelectedProjectId(null);
+      setSelected(menu.client);
+      setPaneOpen(true);
+    }
+    closeContextMenu();
+  };
+  const doEditClient = () => {
+    if (menu.client) startEditClient(menu.client);
+    closeContextMenu();
+  };
+  const doDeleteClient = () => {
+    if (menu.client) void requestDeleteClient(menu.client);
+    closeContextMenu();
+  };
+
+  const doOpenProject = () => {
+    if (menu.project) openProject(menu.project);
+    closeContextMenu();
+  };
+  const doRenameProject = () => {
+    if (menu.project) void renameProject(menu.project);
+    closeContextMenu();
+  };
+  const doDeleteProject = () => {
+    if (menu.project) void requestDeleteProject(menu.project);
+    closeContextMenu();
+  };
+
+  const noteProjectId = menu.projectIdForNote ?? menu.note?.projectId ?? null;
+  const doOpenNote = () => {
+    if (menu.note && noteProjectId) {
+      openProjectByIdAndFocusNote(noteProjectId, menu.note.id);
+    }
+    closeContextMenu();
+  };
+  const doEditNote = () => {
+    if (menu.note && noteProjectId) {
+      void editNoteViaPrompt(noteProjectId, menu.note.id, menu.note.text ?? "");
+    }
+    closeContextMenu();
+  };
+  const doDeleteNote = () => {
+    if (menu.note && noteProjectId) {
+      void requestDeleteNote(noteProjectId, menu.note.id);
+    }
+    closeContextMenu();
+  };
+
+  // Styles
+  const itemCls =
+    "w-full text-left px-3 py-2 text-sm hover:bg-white/10 focus:bg-white/10 outline-none";
+
+  const node = (
+    <div
+      id="zzq-context-menu"
+      className="fixed z-50"
+      style={{ left: menu.x, top: menu.y }}
+      onContextMenu={(e) => {
+        // Prevent nested menus from re-opening native context menu
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+    >
+      <div className="min-w-[220px] rounded-lg border border-white/15 bg-[#0b1020]/95 shadow-xl backdrop-blur-md text-slate-200">
+        <ul className="py-1">
+          {menu.kind === "client" && menu.client && (
+            <>
+              <li>
+                <button className={itemCls} onClick={doOpenClient}>
+                  Open
+                </button>
+              </li>
+              <li>
+                <button className={itemCls} onClick={doEditClient}>
+                  Edit
+                </button>
+              </li>
+              <li>
+                <button className={itemCls} onClick={doDeleteClient}>
+                  Delete
+                </button>
+              </li>
+            </>
+          )}
+          {menu.kind === "project" && menu.project && (
+            <>
+              <li>
+                <button className={itemCls} onClick={doOpenProject}>
+                  Open
+                </button>
+              </li>
+              <li>
+                <button className={itemCls} onClick={doRenameProject}>
+                  Rename
+                </button>
+              </li>
+              <li>
+                <button className={itemCls} onClick={doDeleteProject}>
+                  Delete
+                </button>
+              </li>
+            </>
+          )}
+          {menu.kind === "note" && menu.note && (
+            <>
+              <li>
+                <button className={itemCls} onClick={doOpenNote}>
+                  Open note
+                </button>
+              </li>
+              <li>
+                <button className={itemCls} onClick={doEditNote}>
+                  Edit note
+                </button>
+              </li>
+              <li>
+                <button className={itemCls} onClick={doDeleteNote}>
+                  Delete note
+                </button>
+              </li>
+            </>
+          )}
+        </ul>
+      </div>
+    </div>
+  );
+  return createPortal(node, document.body);
+};
+// Context menu: types, state, helpers
+type MenuKind = "client" | "project" | "note";
+type MenuState = {
+  open: boolean;
+  x: number;
+  y: number;
+  kind: MenuKind;
+  client?: Client;
+  project?: Project;
+  note?: { id: string; text?: string; projectId?: string };
+  // For notes rendered in multiple contexts, ensure we know which project it belongs to
+  projectIdForNote?: string;
+};
+
+const [menu, setMenu] = useState<MenuState>({
+  open: false,
+  x: 0,
+  y: 0,
+  kind: "client",
+});
+
+function openContextMenu(
+  e: React.MouseEvent,
+  payload: Omit<MenuState, "open" | "x" | "y">
+) {
+  e.preventDefault();
+  e.stopPropagation();
+  // Estimate menu size to clamp within viewport
+  const count = 3; // All menu types currently render 3 items (Open, Edit/Rename, Delete)
+  const estW = 220;
+  const itemH = 34;
+  const estH = 10 + count * itemH;
+  const pad = 8;
+  const vw = typeof window !== "undefined" ? window.innerWidth : 1280;
+  const vh = typeof window !== "undefined" ? window.innerHeight : 800;
+  let x = e.clientX;
+  let y = e.clientY;
+  if (x + estW + pad > vw) x = Math.max(pad, vw - estW - pad);
+  if (y + estH + pad > vh) y = Math.max(pad, vh - estH - pad);
+  setMenu({ ...payload, open: true, x, y });
+}
+
+function closeContextMenu() {
+  setMenu((m) => (m.open ? { ...m, open: false } : m));
+}
+
+// Global listeners to dismiss menu
+useEffect(() => {
+  if (!menu.open) return;
+  const onDown = (e: MouseEvent) => {
+    const el = document.getElementById("zzq-context-menu");
+    if (el && el.contains(e.target as Node)) return; // click inside menu → don't close yet
+    closeContextMenu();
+  };
+  const onEsc = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closeContextMenu();
+    }
+  };
+  const onScroll = () => closeContextMenu();
+  window.addEventListener("mousedown", onDown, true);
+  window.addEventListener("wheel", onScroll, { passive: true });
+  window.addEventListener("resize", onScroll);
+  window.addEventListener("keydown", onEsc);
+  return () => {
+    window.removeEventListener("mousedown", onDown, true);
+    window.removeEventListener("wheel", onScroll);
+    window.removeEventListener("resize", onScroll);
+    window.removeEventListener("keydown", onEsc);
+  };
+}, [menu.open]);
+
+// Project deletion (notes cascade)
+const deleteProjectCascade = async (projectId: string) => {
+  if (!user || !selected) return;
+  const base = [
+    "users",
+    user.uid,
+    "sites",
+    "zzq",
+    "clients",
+    selected.id,
+    "projects",
+    projectId,
+  ] as const;
+
+  // Batch delete notes then delete project doc
+  let batch = writeBatch(db);
+  let count = 0;
+  const commit = async () => {
+    if (count > 0) {
+      await batch.commit();
+      batch = writeBatch(db);
+      count = 0;
+    }
+  };
+  const maybeCommit = async () => {
+    if (count >= 400) await commit();
+  };
+
+  const notesSnap = await getDocs(collection(db, ...base, "notes"));
+  notesSnap.forEach((n) => {
+    batch.delete(n.ref);
+    count++;
+  });
+  await commit();
+
+  await deleteDoc(doc(db, ...base));
+};
+
+const requestDeleteProject = async (p: Project) => {
+  const ok = window.confirm(
+    `Delete project "${p.title}" and all notes? This cannot be undone.`
+  );
+  if (!ok) return;
+
+  // Optimistic UI
+  setProjects((prev) => prev.filter((it) => it.id !== p.id));
+  setProjectNotes((prev) => {
+    const next = { ...prev };
+    delete next[p.id];
+    return next;
+  });
+  if (selectedProjectId === p.id) {
+    setSelectedProjectId(null);
+    setProjectLive(null);
+  }
+
+  try {
+    await deleteProjectCascade(p.id);
+  } finally {
+    // no-op; live listeners will reconcile if needed
+  }
+};
+
+// Note deletion
+const deleteProjectNote = async (projectId: string, noteId: string) => {
+  if (!user || !selected) return;
+  await deleteDoc(
+    doc(
+      db,
+      "users",
+      user.uid,
+      "sites",
+      "zzq",
+      "clients",
+      selected.id,
+      "projects",
+      projectId,
+      "notes",
+      noteId
+    )
+  );
+};
+
+const requestDeleteNote = async (projectId: string, noteId: string) => {
+  const ok = window.confirm("Delete this note? This cannot be undone.");
+  if (!ok) return;
+
+  // Optimistic UI
+  setProjectNotes((prev) => ({
+    ...prev,
+    [projectId]: (prev[projectId] ?? []).filter((n) => n.id !== noteId),
+  }));
+
+  try {
+    await deleteProjectNote(projectId, noteId);
+  } finally {
+    // no-op
+  }
+};
   // Keyboard UX:
   // - Ctrl/Cmd+K: focus search
   // - Ctrl/Cmd+N: open Client Quick Add
@@ -586,6 +935,120 @@ export default function ZZQPage() {
       1200
     );
   };
+
+  // Editing clients
+  const startEditClient = (c: Client) => {
+    setEditingClientId(c.id);
+    setEditText(`${c.displayName}${c.username ? ` ${c.username}` : ""}`);
+  };
+  const cancelEditClient = () => {
+    setEditingClientId(null);
+    setEditText("");
+  };
+  const saveEditClient = async () => {
+    if (!user || !editingClientId) return;
+    const { displayName, username } = parseNameUsername(editText || "");
+    if (!displayName) return;
+    // optimistic updates
+    setClients((prev) =>
+      prev.map((it) =>
+        it.id === editingClientId ? { ...it, displayName, username } : it
+      )
+    );
+    setSelected((prev) =>
+      prev && prev.id === editingClientId ? { ...prev, displayName, username } : prev
+    );
+    const ref = doc(
+      db,
+      "users",
+      user.uid,
+      "sites",
+      "zzq",
+      "clients",
+      editingClientId
+    );
+    await updateDoc(ref, { displayName, username, updatedAt: serverTimestamp() });
+    setEditingClientId(null);
+    setEditText("");
+  };
+
+  // Delete client (cascade subcollections)
+  const deleteClientCascade = async (clientId: string) => {
+    if (!user) return;
+    const base = ["users", user.uid, "sites", "zzq", "clients", clientId] as const;
+
+    // Batched deletes to stay under limits
+    let batch = writeBatch(db);
+    let count = 0;
+    const commit = async () => {
+      if (count > 0) {
+        await batch.commit();
+        batch = writeBatch(db);
+        count = 0;
+      }
+    };
+    const maybeCommit = async () => {
+      if (count >= 400) {
+        await commit();
+      }
+    };
+
+    // links
+    const linksSnap = await getDocs(collection(db, ...base, "links"));
+    linksSnap.forEach((d) => {
+      batch.delete(d.ref);
+      count++;
+    });
+    await maybeCommit();
+
+    // projects and notes
+    const projSnap = await getDocs(collection(db, ...base, "projects"));
+    for (const p of projSnap.docs) {
+      const notesSnap = await getDocs(collection(db, ...base, "projects", p.id, "notes"));
+      notesSnap.forEach((n) => {
+        batch.delete(n.ref);
+        count++;
+      });
+      await maybeCommit();
+      batch.delete(p.ref);
+      count++;
+      await maybeCommit();
+    }
+
+    // invites referencing this client
+    const invCol = collection(db, "users", user.uid, "sites", "zzq", "invites");
+    const invSnap = await getDocs(query(invCol, where("clientId", "==", clientId)));
+    invSnap.forEach((i) => {
+      batch.delete(i.ref);
+      count++;
+    });
+    await commit();
+
+    // finally, client doc
+    await deleteDoc(doc(db, ...base));
+  };
+
+  const requestDeleteClient = async (c: Client) => {
+    if (!user) return;
+    const ok = window.confirm(
+      `Delete "${c.displayName}" and all their projects, notes, links, and invites? This cannot be undone.`
+    );
+    if (!ok) return;
+    setDeleteBusyId(c.id);
+    try {
+      // optimistic UI
+      setClients((prev) => prev.filter((it) => it.id !== c.id));
+      if (selected?.id === c.id) {
+        setPaneOpen(false);
+        setSelected(null);
+        setSelectedProjectId(null);
+        setProjectLive(null);
+      }
+      await deleteClientCascade(c.id);
+    } finally {
+      setDeleteBusyId(null);
+    }
+  };
   
   const submitProjectCompose = async () => {
     if (!user || !selected) return;
@@ -863,7 +1326,7 @@ export default function ZZQPage() {
   // Main UI
   return (
     <div className="min-h-screen zzq-bg text-slate-200 overflow-hidden">
-      <div className="flex h-screen">
+      <div className="flex zzq-viewport">
         {/* Clients panel */}
         <aside className="w-[320px] shrink-0 border-r border-white/10 bg-white/[0.04] backdrop-blur-md">
           <div className="p-4 border-b border-white/10">
@@ -960,35 +1423,123 @@ export default function ZZQPage() {
               </>
             ) : (
               <>
-                {filtered.map((c) => (
-                  <button
-                    key={c.id}
-                    onClick={() => {
-                      // Ensure commission panel is closed when selecting a client
-                      setSelectedProjectId(null);
-                      setSelected(c);
-                      setPaneOpen(true);
-                    }}
-                    className={cx(
-                      "w-full text-left rounded-lg border border-white/10 bg-white/[0.03] hover:border-cyan-400/50 hover:bg-white/[0.05] active:scale-[.99] transition",
-                      selected?.id === c.id &&
-                        "border-cyan-500/60 shadow-[0_0_0_1px_rgba(34,211,238,.35)_inset]",
-                      flashClientId === c.id &&
-                        "ring-1 ring-cyan-400/60 shadow-[0_0_0_1px_rgba(34,211,238,.35)_inset]"
-                    )}
-                    title={`Open ${c.displayName}`}
-                    aria-pressed={selected?.id === c.id}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="font-medium">{c.displayName}</div>
+                {filtered.map((c) => {
+                  const isSelected = selected?.id === c.id;
+                  const isFlashing = flashClientId === c.id;
+                  const isEditing = editingClientId === c.id;
+                  const isDeleting = deleteBusyId === c.id;
+                  return (
+                    <div
+                      key={c.id}
+                       onContextMenu={(e) => openContextMenu(e, { kind: "client", client: c })}
+                       className={cx(
+                        "w-full rounded-lg border border-white/10 bg-white/[0.03] hover:border-cyan-400/50 hover:bg-white/[0.05] transition",
+                        isSelected &&
+                          "border-cyan-500/60 shadow-[0_0_0_1px_rgba(34,211,238,.35)_inset]",
+                        isFlashing &&
+                          "ring-1 ring-cyan-400/60 shadow-[0_0_0_1px_rgba(34,211,238,.35)_inset]"
+                      )}
+                    >
+                      {isEditing ? (
+                        <div className="p-2 flex items-center gap-2">
+                          <input
+                            value={editText}
+                            onChange={(e) => setEditText(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                void saveEditClient();
+                              } else if (e.key === "Escape") {
+                                e.preventDefault();
+                                cancelEditClient();
+                              }
+                            }}
+                            placeholder="Name @username"
+                            className="flex-1 rounded-md border border-white/10 bg-white/[0.05] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-cyan-400/60 placeholder:text-slate-500"
+                            aria-label="Edit client"
+                          />
+                          <button
+                            onClick={saveEditClient}
+                            disabled={!parseNameUsername(editText).displayName}
+                            className={cx(
+                              "px-2.5 py-1.5 rounded-md text-xs transition",
+                              parseNameUsername(editText).displayName
+                                ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white hover:opacity-95 active:scale-[.98]"
+                                : "bg-white/[0.06] text-slate-400 cursor-not-allowed"
+                            )}
+                            title="Save"
+                            aria-label="Save"
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={cancelEditClient}
+                            className="px-2.5 py-1.5 rounded-md border border-white/10 hover:bg-white/[0.06] text-xs"
+                            title="Cancel"
+                            aria-label="Cancel"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div onContextMenu={(e) => openContextMenu(e, { kind: "client", client: c })} className="p-2 flex items-center">
+                          <button
+                            onClick={() => {
+                              // Ensure commission panel is closed when selecting a client
+                              setSelectedProjectId(null);
+                              setSelected(c);
+                              setPaneOpen(true);
+                            }}
+                            className="flex-1 text-left group active:scale-[.99] transition"
+                            title={`Open ${c.displayName}`}
+                            aria-pressed={isSelected}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="font-medium group-hover:underline decoration-cyan-400">
+                                {c.displayName}
+                              </div>
+                            </div>
+                            {c.username ? (
+                              <div className="text-xs italic text-slate-400 mt-0.5">{c.username}</div>
+                            ) : null}
+                          </button>
+                          <div className="ml-2 flex items-center gap-1">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                startEditClient(c);
+                              }}
+                              className="p-1.5 rounded-md border border-white/10 hover:bg-white/[0.06]"
+                              title="Edit name/username"
+                              aria-label="Edit client"
+                            >
+                              <svg viewBox="0 0 20 20" className="w-4 h-4 fill-current text-slate-300">
+                                <path d="M14.69 2.86a2 2 0 0 1 2.83 2.83l-8.8 8.8-4.1 1.03 1.03-4.1 8.8-8.8zM12.57 4.98l2.45 2.45" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void requestDeleteClient(c);
+                              }}
+                              disabled={isDeleting}
+                              className={cx(
+                                "p-1.5 rounded-md border border-white/10 hover:bg-white/[0.06]",
+                                isDeleting && "opacity-60 cursor-not-allowed"
+                              )}
+                              title={isDeleting ? "Deleting…" : "Delete client"}
+                              aria-label="Delete client"
+                            >
+                              <svg viewBox="0 0 20 20" className="w-4 h-4 fill-current text-slate-300">
+                                <path d="M7 2h6l1 2h3v2H3V4h3l1-2zm1 6h2v8H8V8zm4 0h2v8h-2V8z" />
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    {c.username ? (
-                      <div className="text-xs italic text-slate-400 mt-0.5">
-                        {c.username}
-                      </div>
-                    ) : null}
-                  </button>
-                ))}
+                  );
+                })}
                 {filtered.length === 0 && !clientsLoading && (
                   <div className="text-sm text-slate-500 px-2">
                     No clients found.
@@ -1001,6 +1552,7 @@ export default function ZZQPage() {
 
         {/* Detail area with slide-in Client panel */}
         <main className="flex-1 relative overflow-hidden">
+            <ContextMenuOverlay />
           <div className="h-full grid place-items-center text-slate-500">
             <div className="text-center px-6">
               <h1 className="text-2xl font-semibold mb-2">
@@ -1345,7 +1897,7 @@ export default function ZZQPage() {
                           projects.map((p) => (
                             <li
                               key={p.id}
-                              className={cx(
+                              onContextMenu={(e) => openContextMenu(e, { kind: "project", project: p })} className={cx(
                                 "p-3 flex items-center gap-3 rounded-md",
                                 flashProjectId === p.id && "ring-1 ring-cyan-400/60 bg-white/[0.04]"
                               )}
@@ -1485,7 +2037,7 @@ export default function ZZQPage() {
                           </>
                         ) : aggregatedNotes.length > 0 ? (
                           aggregatedNotes.map((n, idx) => (
-                            <li key={`${n.projectId}:${n.id}`} className="p-3">
+                            <li key={`${n.projectId}:${n.id}`} onContextMenu={(e) => openContextMenu(e, { kind: "note", note: n })} className="p-3">
                               <button
                                 onClick={() =>
                                   openProjectByIdAndFocusNote(n.projectId, n.id)
