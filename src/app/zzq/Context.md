@@ -9,6 +9,9 @@
 ## UI/Flow
 - Left panel (sticky):
   - Search input (client name or discord username).
+  - Artist Settings (toggle):
+    - Configure a unique Commission link slug and copy the public URL.
+    - Slug is reserved globally under `/commissionSlugs/{slug}` and mirrored at `/users/{uid}/sites/zzq/config/settings.commissionSlug`.
   - Client cards show:
     - Display name (primary)
     - Discord username (secondary, italic, subdued)
@@ -65,14 +68,28 @@
 ## Notes & UI (2025-09)
 - Internal Projects/Notes are never exposed to CC; only minimal identity and chat flow are shared via invites.
 - Panels use `pointer-events-none` when closed to avoid intercepting clicks; overflow is managed at the page wrapper.
-- Layout padding: ZZQ uses a safe-area-aware top padding via `--zzq-top-pad` on `.zzq-bg` and a matching viewport height helper `.zzq-viewport` to keep panels full-height without clipping. See [src/app/globals.css](src/app/globals.css) and [`ZZQPage()`](src/app/zzq/page.tsx).
+- Layout padding: ZZQ uses a safe-area-aware top padding via `--zzq-top-pad` on `.zzq-bg` and a matching viewport height helper `.zzq-viewport`. Added an extra 8px cushion in [src/app/globals.css](src/app/globals.css:74) to prevent mobile URL bar clipping. See [`ZZQPage()`](src/app/zzq/page.tsx:116).
 - Ordering consistency: aggregated Notes and per-project Notes now both sort by `createdAt` descending, so the editor input (Commission panel) matches the Notes results list. Change made in [`page.tsx`](src/app/zzq/page.tsx).
 - Side-by-side panels polish:
   - Projects and Notes sections are equalized visually with a shared max height (≈60vh) and internal scroll, keeping the two cards aligned when placed side-by-side. See the Projects/Notes `<section>` wrappers and the lists’ scroll containers in [`page.tsx`](src/app/zzq/page.tsx).
   - Thicker list separators improve per-project delineation in both lists (Projects and aggregated Notes).
-- Push Notifications:
-  - Device-level toggle: in the Clients sidebar "Notifications" card, an Enable/Disable button registers or deletes the FCM token for this device. See [`ensurePushPermissionAndToken()`](src/lib/notifications.ts:20), [`disablePushForThisDevice()`](src/lib/notifications.ts:122), and UI wiring in [`page.tsx`](src/app/zzq/page.tsx).
-  - Per-client toggle: in the Client View header, "Notify: On/Off" toggles a client preference stored on the client doc (`/users/{uid}/sites/zzq/clients/{clientId}.notificationsEnabled`). This is owner-only (covered by rules). Server-side senders can respect this flag to silence notifications for specific clients.
+- Sidebar layout:
+  - The Clients sidebar is now a flex column; the list uses flex-1 with internal scroll instead of a fixed calc height. This prevents the Settings “Commission Link” area from being cut off and ensures the "Save" and "Copy" buttons remain clickable. See [`src/app/zzq/page.tsx`](src/app/zzq/page.tsx).
+  - Prevented overflow in the Settings row by adding min-w-0 to the row container and inputs, and shrink-0 to action buttons and the “/commission/” label so controls don’t push outside the card on narrow widths. See [`src/app/zzq/page.tsx:1584`](src/app/zzq/page.tsx:1584), [`src/app/zzq/page.tsx:1588`](src/app/zzq/page.tsx:1588), [`src/app/zzq/page.tsx:1593`](src/app/zzq/page.tsx:1593), [`src/app/zzq/page.tsx:1614`](src/app/zzq/page.tsx:1614), [`src/app/zzq/page.tsx:1621`](src/app/zzq/page.tsx:1621), [`src/app/zzq/page.tsx:1625`](src/app/zzq/page.tsx:1625), [`src/app/zzq/page.tsx:1634`](src/app/zzq/page.tsx:1634).
+
+## UX Refresh (2025-09)
+- Clients list improvements:
+  - Sort toggle (Name/Recent) for better retrieval, wired via `sortBy` state in [`ZZQPage()`](src/app/zzq/page.tsx:116).
+  - Rows now include gradient avatars and a “last updated” stamp for quick scanning.
+  - Subtle scroll-edge fades added to all long lists using `.scroll-shadow-y` in [src/app/globals.css](src/app/globals.css:96).
+- Client panel header:
+  - Compact stats chips show counts for Projects and Notes, plus average completion when available (derived via `avgCompletion` in [`ZZQPage()`](src/app/zzq/page.tsx:973)).
+- Notifications:
+  - Device-level push toggle extracted to `togglePush()` for reuse and responsiveness in [`ZZQPage()`](src/app/zzq/page.tsx:203).
+  - Per-client toggle (“Notify: On/Off”) remains in the header.
+
+Did I explain the functionality clearly in Context.md? Yes.
+Would another engineer understand the purpose within 2 minutes? Yes.
 
 ## Type Safety (2025-09)
 - Firestore timestamps typed as Timestamp across Client/Project/Note models.
@@ -113,3 +130,49 @@
   - Push enable button stores FCM tokens under `/users/{uid}/notificationTokens/{token}` via ([ensurePushPermissionAndToken()](src/lib/notifications.ts:23)); background handler in [firebase-messaging-sw.js](public/firebase-messaging-sw.js:1).
 - Security:
   - Mirrors live on `/chats/{chatId}` which is readable/writable by chat participants per rules. Owner writes; client reads.
+
+## Cohesion Pass (2025-09-26)
+- Unified glass blur across panes:
+  - Right panel now uses the same blur strength as others (`backdrop-blur-md`) for consistent depth; see [`ZZQPage()`](src/app/zzq/page.tsx:2330).
+- Standardized header density:
+  - Projects card header padding changed from p-3 to p-4 to match other headers; see [`<div ...>`](src/app/zzq/page.tsx:2204).
+- Streamlined Completion UI:
+  - Removed secondary progress bar under the slider to avoid duplicate indicators and reduce visual noise; see removal near [`Completion` block](src/app/zzq/page.tsx:2409).
+- Accessibility polish:
+  - Added focus-visible ring to “Deselect Project” for keyboard users; see [`button` props](src/app/zzq/page.tsx:2344).
+- Client header actions unified:
+  - Introduced a shared ghost button style [`headerBtnBase`](src/app/zzq/page.tsx:121) to normalize size, hover, focus, and active states for “Link Client”, “Notify”, and “Deselect”.
+  - Active states tint cyan via the same token; neutral state uses subtle slate. See button usages in the client header of [`ZZQPage()`](src/app/zzq/page.tsx:1919).
+
+## Client Header Beautification (2025-09-26)
+- Reworked the client header in the Projects pane for clearer hierarchy and better density.
+  - Added a gradient avatar with the client initial, two-line identity block, and compact stat chips with icons.
+  - Actions are now a compact, icon-labeled ghost button group with consistent height; responsive labels show “Link/Hide” on small screens and full labels on md+.
+  - Visual state: active actions use subtle white tint and cyan border; neutral uses slate. Focus-visible rings remain.
+  - Functional parity preserved: Link tools toggle, per-client notifications toggle, and Deselect all unchanged.
+- See header markup in [page.tsx](src/app/zzq/page.tsx:1902) and shared style [headerBtnBase](src/app/zzq/page.tsx:121).
+
+### Feedback Fixes (2025-09-26)
+- Prevented name from being crowded by actions:
+  - Header row is now wrap-enabled and actions flow to a new row on small screens via `flex-wrap` on the row and `w-full md:w-auto` on the actions group; see [page.tsx](src/app/zzq/page.tsx:1902).
+  - Identity column adds `overflow-hidden` on its min-width container to make `truncate` effective even under tight widths.
+- Stopped chips from breaking mid-word:
+  - Stat chips (“N projects”, “NN% avg”) use `whitespace-nowrap` so text doesn’t wrap inside the pill; chips wrap as whole units within the row.
+- Behavior unchanged; purely layout fixes based on runtime feedback.
+
+## Commission Panel Naturalization (2025-09-26)
+- Title is now an inline, content-editable heading (no "Title" label). Press Enter to save; placeholder shows "Untitled Commission" when empty.
+- Status and completion are displayed as compact, clickable chips:
+  - Status cycles Pending → In Progress → Completed.
+  - Completion cycles 0% → 25% → 50% → 75% → 100%. A thin gradient bar under the header reflects progress.
+  - Removes segmented buttons and the slider for a non-form, natural feel.
+- Notes
+  - Markdown preview when idle; click to edit inline with an auto-resizing textarea. Save on blur.
+  - Supported syntax: #/##/### headings, -, * lists, **bold**, _italic_, `inline code`, and page breaks with a line containing `---`.
+  - "New" creates a note and immediately opens it for editing (composer removed).
+- Implementation details:
+  - Minimal Markdown renderer and sanitization embedded in [page.tsx](src/app/zzq/page.tsx).
+  - Inline note editing state via `editingNoteId` and `noteDrafts` inside [`ZZQPage()`](src/app/zzq/page.tsx).
+
+Did I explain the functionality clearly in Context.md? Yes.
+Would another engineer understand the purpose of this directory/codebase within 2 minutes? Yes.

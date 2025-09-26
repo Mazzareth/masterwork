@@ -17,6 +17,7 @@ import {
   Timestamp,
   deleteDoc,
   getDocs,
+  getDoc,
   setDoc,
   writeBatch,
 } from "firebase/firestore";
@@ -32,6 +33,7 @@ import {
   type ClientLink,
 } from "../../lib/linking";
 import { ensurePushPermissionAndToken, disablePushForThisDevice, getCurrentFcmTokenIfSupported } from "../../lib/notifications";
+import { reserveCommissionSlug } from "@/lib/commission";
 
 type Client = {
   id: string;
@@ -115,6 +117,9 @@ function StatusBadge({ status }: { status: Project["status"] }) {
 
 export default function ZZQPage() {
   const { user, permissions, loading, loginWithGoogle } = useAuth();
+  // Unified ghost button style for Client header actions
+  const headerBtnBase =
+    "px-3 py-1.5 rounded-md border text-xs md:text-sm transition hover:bg-white/[0.06] active:scale-[.98] focus-visible:ring-2 focus-visible:ring-cyan-400/60";
 
   // Clients
   const [clients, setClients] = useState<Client[]>([]);
@@ -122,6 +127,7 @@ export default function ZZQPage() {
   const [q, setQ] = useState("");
   const dq = useDebounced(q, 150);
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const [sortBy, setSortBy] = useState<"name" | "recent">("name");
 
   // Selection
   const [selected, setSelected] = useState<Client | null>(null);
@@ -204,6 +210,29 @@ export default function ZZQPage() {
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
 
+  // Artist Settings (Commission link)
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSlug, setSettingsSlug] = useState("");
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
+  const [currentSlug, setCurrentSlug] = useState<string | null>(null);
+  
+  const togglePush = async () => {
+    if (!user || pushBusy) return;
+    setPushBusy(true);
+    try {
+      if (pushEnabled) {
+        await disablePushForThisDevice(user.uid);
+        setPushEnabled(false);
+      } else {
+        const t = await ensurePushPermissionAndToken(user.uid);
+        setPushEnabled(Boolean(t));
+      }
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
 
   // Project panel: derive open state from selectedProjectId AND projectLive
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -212,6 +241,9 @@ export default function ZZQPage() {
 
   // Inline notes (per project)
   const [projectNotes, setProjectNotes] = useState<Record<string, Note[]>>({});
+  // Inline note editing state for Commission panel
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
 
   // UI focus/keyboard
   const clientCloseRef = useRef<HTMLButtonElement | null>(null);
@@ -612,8 +644,8 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
   // - Ctrl/Cmd+K: focus search
   // - Ctrl/Cmd+N: open Client Quick Add
   // - Ctrl/Cmd+Shift+N: open Project Quick Add (when a client is open)
-  // - Ctrl/Cmd+Shift+M: open Note Quick Add (when a client is open)
-  // - Esc: close Note Composer → Project Composer → Client Composer → Commission → Client
+  // - Ctrl/Cmd+Shift+M: open Project Note Quick Add (when a project is open)
+  // - Esc: close composers (Note → Project → Client); or deselect Project/Client
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const isMod = e.metaKey || e.ctrlKey;
@@ -640,21 +672,15 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
         setTimeout(() => projectComposeInputRef.current?.focus(), 0);
         return;
       }
-      if (isModShiftM && paneOpen && selected) {
+      if (isModShiftM && selected && selectedProjectId) {
         e.preventDefault();
-        const defaultPid = selectedProjectId ?? (projects[0]?.id ?? null);
-        setNoteComposeProjectId(defaultPid);
-        setNoteComposeOpen(true);
-        setTimeout(() => noteComposeInputRef.current?.focus(), 0);
+        setCommissionNoteComposeOpen(true);
+        setTimeout(() => commissionNoteComposeInputRef.current?.focus(), 0);
         return;
       }
       if (e.key === "Escape") {
         if (commissionNoteComposeOpen) {
           setCommissionNoteComposeOpen(false);
-          return;
-        }
-        if (noteComposeOpen) {
-          setNoteComposeOpen(false);
           return;
         }
         if (projectComposeOpen) {
@@ -958,19 +984,149 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
     return map;
   }, [projects]);
 
-  type AggregatedNote = Note & { projectId: string };
-  const aggregatedNotes: AggregatedNote[] = useMemo(() => {
-    const all: AggregatedNote[] = [];
-    Object.entries(projectNotes).forEach(([pid, list]) => {
-      list?.forEach((n) => all.push({ ...n, projectId: pid }));
+
+  const avgCompletion = useMemo(() => {
+    if (projects.length === 0) return null;
+    const sum = projects.reduce((acc, p) => acc + (p.completion ?? 0), 0);
+    return Math.round(sum / projects.length);
+  }, [projects]);
+
+  // Commission panel helpers (naturalized UI)
+  const statusLabel = (s: Project["status"]) =>
+    s === "in_progress" ? "In Progress" : s[0].toUpperCase() + s.slice(1);
+
+  const cycleStatus = () => {
+    if (!projectLive) return;
+    const order: Project["status"][] = ["pending", "in_progress", "completed"];
+    const idx = order.indexOf(projectLive.status);
+    const next = order[(idx + 1) % order.length];
+    void updateProject({ status: next });
+  };
+
+  const cycleCompletion = () => {
+    if (!projectLive) return;
+    const cur = Math.round(projectLive.completion ?? 0);
+    const steps = [0, 25, 50, 75, 100];
+    let idx = steps.findIndex((v) => cur < v);
+    if (idx === -1) idx = 0;
+    const next = steps[idx];
+    void updateProject({ completion: next });
+  };
+
+  function escapeHtml(str: string) {
+    return str
+      .replace(/&/g, "&")
+      .replace(/</g, "<")
+      .replace(/>/g, ">");
+  }
+
+  function inlineMarkdown(text: string) {
+    let t = escapeHtml(text);
+    t = t.replace(/`([^`]+)`/g, '<code class="px-1 rounded bg-white/10 text-slate-200">$1</code>');
+    t = t.replace(/\*\*([^*]+)\*\*/g, '<strong class="font-semibold text-slate-100">$1</strong>');
+    t = t.replace(/_([^_]+)_/g, '<em class="italic text-slate-300">$1</em>');
+    return t;
+  }
+
+  function renderMarkdownToHtml(md: string): string {
+    const lines = md.split(/\r?\n/);
+    const parts: string[] = [];
+    let inList = false;
+
+    for (const raw of lines) {
+      const trimmed = raw.trim();
+      if (trimmed === "") {
+        if (inList) {
+          parts.push("</ul>");
+          inList = false;
+        }
+        parts.push('<div class="h-3"></div>');
+        continue;
+      }
+      if (/^-{3,}$/.test(trimmed)) {
+        if (inList) {
+          parts.push("</ul>");
+          inList = false;
+        }
+        parts.push('<hr class="my-3 border-white/10" />');
+        continue;
+      }
+      const h = trimmed.match(/^(#{1,3})\s+(.*)$/);
+      if (h) {
+        const level = h[1].length;
+        const txt = inlineMarkdown(h[2]);
+        const size =
+          level === 1 ? "text-lg md:text-xl" : level === 2 ? "text-base md:text-lg" : "text-sm md:text-base";
+        parts.push(`<h${level} class="font-semibold text-slate-100 ${size}">${txt}</h${level}>`);
+        continue;
+      }
+      if (/^[-*]\s+/.test(trimmed)) {
+        if (!inList) {
+          inList = true;
+          parts.push('<ul class="list-disc pl-5 space-y-1 text-sm text-slate-200/90">');
+        }
+        const li = inlineMarkdown(trimmed.replace(/^[-*]\s+/, ""));
+        parts.push(`<li>${li}</li>`);
+        continue;
+      }
+      if (inList) {
+        parts.push("</ul>");
+        inList = false;
+      }
+      parts.push(`<p class="text-sm text-slate-200/90">${inlineMarkdown(trimmed)}</p>`);
+    }
+    if (inList) parts.push("</ul>");
+    return parts.join("");
+  }
+
+  function MarkdownView({ text }: { text?: string }) {
+    const html = useMemo(() => renderMarkdownToHtml(text || ""), [text]);
+    return <div dangerouslySetInnerHTML={{ __html: html }} />;
+  }
+
+  const autoResize = (el: HTMLTextAreaElement) => {
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  };
+
+  const startEditNote = (id: string, initial: string) => {
+    setEditingNoteId(id);
+    setNoteDrafts((prev) => ({ ...prev, [id]: initial || "" }));
+    setTimeout(() => {
+      const ta = document.querySelector<HTMLTextAreaElement>(`#note-${id} textarea`);
+      if (ta) {
+        ta.focus();
+        autoResize(ta);
+      }
+    }, 0);
+  };
+
+  const createAndEditCommissionNote = async () => {
+    if (!user || !selected || !selectedProjectId) return;
+    const colRef = collection(
+      db,
+      "users",
+      user.uid,
+      "sites",
+      "zzq",
+      "clients",
+      selected.id,
+      "projects",
+      selectedProjectId,
+      "notes"
+    );
+    const docRef = await addDoc(colRef, {
+      text: "",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     });
-    all.sort((a, b) => {
-      const ta = a.createdAt?.seconds ?? 0;
-      const tb = b.createdAt?.seconds ?? 0;
-      return tb - ta;
-    });
-    return all;
-  }, [projectNotes]);
+    setEditingNoteId(docRef.id);
+    setScrollTargetNoteId(docRef.id);
+    setTimeout(() => {
+      const ta = document.querySelector<HTMLTextAreaElement>(`#note-${docRef.id} textarea`);
+      ta?.focus();
+    }, 0);
+  };
 
   const filtered = useMemo(() => {
     const t = dq.trim().toLowerCase();
@@ -981,6 +1137,22 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
         (c.username || "").toLowerCase().includes(t)
     );
   }, [dq, clients]);
+
+  const filteredSorted = useMemo(() => {
+    const arr = [...filtered];
+    if (sortBy === "recent") {
+      arr.sort(
+        (a, b) => (b.updatedAt?.seconds ?? 0) - (a.updatedAt?.seconds ?? 0)
+      );
+    } else {
+      arr.sort((a, b) =>
+        a.displayName.localeCompare(b.displayName, undefined, {
+          sensitivity: "base",
+        })
+      );
+    }
+    return arr;
+  }, [filtered, sortBy]);
 
   // Actions
   const submitCompose = async () => {
@@ -1388,6 +1560,22 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
     })();
   }, []);
 
+  // Load artist commission settings (slug)
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      try {
+        const ref = doc(db, "users", user.uid, "sites", "zzq", "config", "settings");
+        const snap = await getDoc(ref);
+        const slug = (snap.data() as { commissionSlug?: string } | undefined)?.commissionSlug || "";
+        setSettingsSlug(slug);
+        setCurrentSlug(slug || null);
+      } catch {
+        // ignore
+      }
+    })();
+  }, [user]);
+
 
   // Gates
   if (loading) {
@@ -1449,22 +1637,34 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
     <div className="min-h-screen zzq-bg text-slate-200 overflow-hidden">
       <div className="flex zzq-viewport">
         {/* Clients panel */}
-        <aside className="w-[320px] shrink-0 border-r border-white/10 bg-white/[0.04] backdrop-blur-md">
+        <aside className="w-[320px] shrink-0 border-r border-white/10 bg-white/[0.04] backdrop-blur-md h-full flex flex-col">
           <div className="p-4 border-b border-white/10">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">
                 <span className="text-gradient">Clients</span>
               </h2>
-              <button
-                onClick={() => {
-                  setComposeOpen((v) => !v);
-                  if (!composeOpen) setTimeout(() => composeInputRef.current?.focus(), 0);
-                }}
-                className="px-2.5 py-1.5 rounded-md bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white text-sm hover:opacity-95 active:scale-[.98] transition"
-                title={composeOpen ? "Cancel adding client" : "Add client"}
-              >
-                {composeOpen ? "Cancel" : "+ Add"}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setSettingsOpen((v) => !v)}
+                  className={cx(
+                    "px-2.5 py-1.5 rounded-md border text-sm transition",
+                    settingsOpen ? "border-cyan-500/60 text-cyan-200 bg-white/[0.06]" : "border-white/10 text-slate-200 hover:bg-white/[0.06]"
+                  )}
+                  title={settingsOpen ? "Hide Settings" : "Artist Settings"}
+                >
+                  Settings
+                </button>
+                <button
+                  onClick={() => {
+                    setComposeOpen((v) => !v);
+                    if (!composeOpen) setTimeout(() => composeInputRef.current?.focus(), 0);
+                  }}
+                  className="px-2.5 py-1.5 rounded-md bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white text-sm hover:opacity-95 active:scale-[.98] transition"
+                  title={composeOpen ? "Cancel adding client" : "Add client"}
+                >
+                  {composeOpen ? "Cancel" : "+ Add"}
+                </button>
+              </div>
             </div>
             <div className="mt-3 relative">
               <input
@@ -1476,6 +1676,103 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
                 aria-label="Search clients"
               />
             </div>
+            <div className="mt-2 flex items-center justify-between">
+              <div className="inline-flex rounded-md border border-white/10 overflow-hidden">
+                <button
+                  onClick={() => setSortBy("name")}
+                  className={cx(
+                    "px-2.5 py-1.5 text-xs",
+                    sortBy === "name" ? "bg-white/[0.08] text-slate-200" : "hover:bg-white/[0.06] text-slate-400"
+                  )}
+                  aria-pressed={sortBy === "name"}
+                  title="Sort by name (A–Z)"
+                >
+                  Name
+                </button>
+                <button
+                  onClick={() => setSortBy("recent")}
+                  className={cx(
+                    "px-2.5 py-1.5 text-xs border-l border-white/10",
+                    sortBy === "recent" ? "bg-white/[0.08] text-slate-200" : "hover:bg-white/[0.06] text-slate-400"
+                  )}
+                  aria-pressed={sortBy === "recent"}
+                  title="Sort by most recently updated"
+                >
+                  Recent
+                </button>
+              </div>
+            </div>
+
+            {settingsOpen && (
+              <div className="mt-3 rounded-lg border border-cyan-500/40 bg-white/[0.03] p-3">
+                <div className="flex items-start justify-between gap-2 min-w-0">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[11px] uppercase tracking-wide text-slate-400 mb-1">Commission Link</div>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-xs text-slate-400 shrink-0">/commission/</span>
+                      <input
+                        value={settingsSlug}
+                        onChange={(e) => setSettingsSlug(e.target.value.toLowerCase())}
+                        placeholder="your-name"
+                        className="flex-1 min-w-0 rounded-md border border-white/10 bg-white/[0.05] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-cyan-400/60 placeholder:text-slate-500"
+                        aria-label="Commission link slug"
+                      />
+                      <button
+                        onClick={async () => {
+                          if (!user) return;
+                          const s = (settingsSlug || "").trim();
+                          if (!s) return;
+                          setSettingsSaving(true);
+                          setSettingsMessage(null);
+                          try {
+                            await reserveCommissionSlug({ ownerId: user.uid, slug: s, previousSlug: currentSlug || undefined });
+                            setCurrentSlug(s);
+                            setSettingsMessage("Saved");
+                          } catch {
+                            setSettingsMessage("Failed to save slug");
+                          } finally {
+                            setSettingsSaving(false);
+                          }
+                        }}
+                        disabled={!settingsSlug.trim() || settingsSaving}
+                        className="shrink-0 px-3 py-2 rounded-md bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white text-sm disabled:opacity-60"
+                        title="Save slug"
+                      >
+                        {settingsSaving ? "Saving…" : "Save"}
+                      </button>
+                    </div>
+                    {currentSlug ? (
+                      <div className="mt-2 flex items-center gap-2 min-w-0">
+                        <input
+                          readOnly
+                          value={`${typeof window !== "undefined" ? window.location.origin : "https://app.masterwork.app"}/commission/${currentSlug}`}
+                          className="flex-1 min-w-0 rounded-md border border-white/10 bg-white/[0.05] px-3 py-2 text-xs"
+                        />
+                        <button
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(`${window.location.origin}/commission/${currentSlug}`);
+                              setSettingsMessage("Link copied");
+                            } catch {}
+                          }}
+                          className="shrink-0 px-3 py-2 rounded-md border border-white/10 hover:bg-white/[0.06] text-xs"
+                          title="Copy link"
+                        >
+                          Copy
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-[11px] text-slate-500">
+                        Choose a unique slug to share your commission page.
+                      </div>
+                    )}
+                  </div>
+                  <div className="shrink-0">
+                    {settingsMessage && <div className="text-xs text-slate-400">{settingsMessage}</div>}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {composeOpen && (
               <div className="mt-3 rounded-lg border border-cyan-500/40 bg-white/[0.03] p-3">
@@ -1536,21 +1833,7 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
               <div className="flex items-center justify-between">
                 <div className="font-medium">Notifications</div>
                 <button
-                  onClick={async () => {
-                    if (!user || pushBusy) return;
-                    setPushBusy(true);
-                    try {
-                      if (pushEnabled) {
-                        await disablePushForThisDevice(user.uid);
-                        setPushEnabled(false);
-                      } else {
-                        const t = await ensurePushPermissionAndToken(user.uid);
-                        setPushEnabled(Boolean(t));
-                      }
-                    } finally {
-                      setPushBusy(false);
-                    }
-                  }}
+                  onClick={togglePush}
                   className={cx(
                     "px-2 py-1 rounded-md border text-xs transition",
                     pushEnabled
@@ -1601,7 +1884,7 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
             </div>
           </div>
 
-          <div className="overflow-y-auto h-[calc(100vh-98px)] p-2 space-y-2">
+          <div className="overflow-y-auto flex-1 p-2 space-y-2 scroll-shadow-y">
             {clientsLoading ? (
               <>
                 {Array.from({ length: 8 }).map((_, i) => (
@@ -1613,7 +1896,7 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
               </>
             ) : (
               <>
-                {filtered.map((c) => {
+                {filteredSorted.map((c) => {
                   const isSelected = selected?.id === c.id;
                   const isFlashing = flashClientId === c.id;
                   const isEditing = editingClientId === c.id;
@@ -1673,6 +1956,9 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
                         </div>
                       ) : (
                         <div onContextMenu={(e) => openContextMenu(e, { kind: "client", client: c })} className="p-2 flex items-center">
+                          <div className="mr-2 size-8 rounded-full bg-gradient-to-br from-cyan-500/60 to-fuchsia-500/60 text-white grid place-items-center text-sm font-semibold">
+                            {(c.displayName || "").trim().charAt(0).toUpperCase() || "C"}
+                          </div>
                           <button
                             onClick={() => {
                               // Ensure commission panel is closed when selecting a client
@@ -1684,14 +1970,19 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
                             title={`Open ${c.displayName}`}
                             aria-pressed={isSelected}
                           >
-                            <div className="flex items-center justify-between">
-                              <div className="font-medium group-hover:underline decoration-cyan-400">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="font-medium group-hover:underline decoration-cyan-400 truncate">
                                 {c.displayName}
                               </div>
+                              <div className="shrink-0 text-[11px] text-slate-500">
+                                {c.updatedAt?.toDate?.()
+                                  ? c.updatedAt.toDate().toLocaleDateString([], { month: "short", day: "numeric" })
+                                  : ""}
+                              </div>
                             </div>
-                            {c.username ? (
-                              <div className="text-xs italic text-slate-400 mt-0.5">{c.username}</div>
-                            ) : null}
+                            <div className="text-xs text-slate-400 mt-0.5 truncate">
+                              {c.username || "\u00A0"}
+                            </div>
                           </button>
                           <div className="ml-2 flex items-center gap-1">
                             <button
@@ -1743,323 +2034,362 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
         {/* Detail area with slide-in Client panel */}
         <main className="flex-1 relative overflow-hidden">
             <ContextMenuOverlay />
-          <div className="h-full grid place-items-center text-slate-500">
-            <div className="text-center px-6">
-              <h1 className="text-2xl font-semibold mb-2">
-                <span className="text-gradient">ZZQ</span>
-              </h1>
-              <p className="max-w-md mx-auto">
-                Select a client from the left to manage projects and notes.
-              </p>
-            </div>
-          </div>
-
-          <div
-            className={cx(
-              "absolute inset-0 bg-white/[0.04] backdrop-blur-xl border-l border-white/10 shadow-xl transition-transform duration-300 ease-[var(--ease-snap)] will-change-transform",
-              paneOpen ? "translate-x-0 pointer-events-auto" : "translate-x-full pointer-events-none"
-            )}
-            aria-hidden={!paneOpen}
-          >
-            {selected && (
-              <div className="h-full flex flex-col">
-                <div className="p-4 border-b border-white/10 flex items-center justify-between bg-gradient-to-r from-cyan-500/10 to-transparent">
-                  <div>
-                    <div className="text-lg font-semibold">
-                      {selected.displayName}
-                    </div>
-                    {selected.username ? (
-                      <div className="text-xs italic text-slate-400">
-                        {selected.username}
+          <div className="h-full flex">
+            {/* Middle panel: Projects for selected client */}
+            <aside className="w-[380px] shrink-0 border-r border-white/10 bg-white/[0.04] backdrop-blur-md h-full flex flex-col">
+              {selected ? (
+                <div className="h-full flex flex-col">
+                  <div className="p-4 border-b border-white/10 bg-gradient-to-r from-cyan-500/10 to-transparent">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0 overflow-hidden">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="mr-1 size-8 rounded-full bg-gradient-to-br from-cyan-500/60 to-fuchsia-500/60 text-white grid place-items-center text-sm font-semibold">
+                            {(selected.displayName || "C").trim().charAt(0).toUpperCase()}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-base md:text-lg font-semibold truncate">
+                              {selected.displayName}
+                            </div>
+                            {selected.username ? (
+                              <div className="text-xs italic text-slate-400 truncate">
+                                {selected.username}
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+                        <div className="mt-2 flex items-center gap-2 text-[11px] text-slate-400 flex-wrap">
+                          <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.03] px-2 py-0.5 whitespace-nowrap">
+                            <svg viewBox="0 0 20 20" className="w-3 h-3 text-slate-300" aria-hidden="true">
+                              <path d="M3 4h14v2H3V4zm0 4h10v2H3V8zm0 4h14v2H3v-2z" />
+                            </svg>
+                            {projects.length} projects
+                          </span>
+                          {avgCompletion !== null ? (
+                            <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.03] px-2 py-0.5 whitespace-nowrap">
+                              <svg viewBox="0 0 20 20" className="w-3 h-3 text-slate-300" aria-hidden="true">
+                                <path d="M3 16h14v-2H3v2zm2-3h3V6H5v7zm5 0h3V3h-3v10zm5 0h3V9h-3v4z" />
+                              </svg>
+                              {avgCompletion}% avg
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
-                    ) : null}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => {
-                        setLinkPanelOpen((v) => !v);
-                        setInviteUrl(null);
-                        setInviteError(null);
-                      }}
-                      className="px-3 py-1.5 rounded-md border border-cyan-500/40 text-cyan-200 hover:bg-white/[0.06] active:scale-[.98] transition"
-                      title={linkPanelOpen ? "Hide linking tools" : "Link client to CC"}
-                    >
-                      {linkPanelOpen ? "Hide Link" : "Link Client"}
-                    </button>
-                    <button
-                      onClick={() => { void toggleNotificationsForSelectedClient(); }}
-                      className={cx(
-                        "px-3 py-1.5 rounded-md border text-xs md:text-sm transition",
-                        selected?.notificationsEnabled
-                          ? "border-cyan-500/40 text-cyan-200 hover:bg-white/[0.06]"
-                          : "border-white/10 text-slate-200 hover:bg-white/[0.06]"
-                      )}
-                      title="Toggle push notifications for this client"
-                    >
-                      {selected?.notificationsEnabled ? "Notify: On" : "Notify: Off"}
-                    </button>
-                    <button
-                      ref={clientCloseRef}
-                      onClick={() => {
-                        setPaneOpen(false);
-                        // Also guarantee commission is closed when closing client pane
-                        setSelectedProjectId(null);
-                        setLinkPanelOpen(false);
-                      }}
-                      className="px-3 py-1.5 rounded-md border border-white/10 hover:bg-white/[0.06] active:scale-[.98] transition focus-visible:ring-2 focus-visible:ring-cyan-400/60"
-                      title="Close"
-                    >
-                      Close
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex-1 overflow-y-auto p-4">
-                  {linkPanelOpen && (
-                    <div className="mb-4 rounded-lg border border-cyan-500/40 bg-white/[0.03] p-3 space-y-4">
-                      <div className="flex items-center justify-between">
-                        <div className="font-medium">Link this client to CC</div>
+                      <div className="w-full md:w-auto flex items-center gap-1.5 shrink-0 justify-end md:justify-start mt-2 md:mt-0">
                         <button
-                          onClick={async () => {
-                            if (!user || !selected || inviteBusy) return;
-                            setInviteBusy(true);
-                            setInviteError(null);
+                          onClick={() => {
+                            setLinkPanelOpen((v) => !v);
                             setInviteUrl(null);
-                            try {
-                              const res = await createInvite({
-                                ownerId: user.uid,
-                                clientId: selected.id,
-                                clientDisplayName: selected.displayName,
-                              });
-                              setInviteUrl(res.url);
-                            } catch (e) {
-                              setInviteError("Failed to create invite");
-                            } finally {
-                              setInviteBusy(false);
-                            }
+                            setInviteError(null);
                           }}
-                          className="px-3 py-1.5 rounded-md bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white text-xs hover:opacity-95 active:scale-[.98] disabled:opacity-60"
-                          disabled={inviteBusy}
-                          title="Generate invite link"
+                          className={cx(
+                            headerBtnBase,
+                            "h-8 px-2.5",
+                            linkPanelOpen
+                              ? "border-cyan-500/50 text-cyan-200 bg-white/[0.04]"
+                              : "border-white/10 text-slate-200"
+                          )}
+                          aria-pressed={linkPanelOpen}
+                          title={linkPanelOpen ? "Hide linking tools" : "Link client to CC"}
                         >
-                          {inviteBusy ? "Generating…" : "Generate Link"}
+                          <span className="inline-flex items-center gap-1.5">
+                            <svg viewBox="0 0 20 20" className="w-4 h-4" aria-hidden="true">
+                              <path fill="currentColor" d="M7.05 11.95a3 3 0 0 1 0-4.24l2.83-2.83a3 3 0 0 1 4.24 0l.71.71-1.41 1.41-.71-.71a1 1 0 0 0-1.41 0L8.47 9.12a1 1 0 0 0 0 1.41l.71.71-1.41 1.41-.72-.7zm5.9-3.9a3 3 0 0 1 0 4.24l-2.83 2.83a3 3 0 0 1-4.24 0l-.71-.71 1.41-1.41.71.71a1 1 0 0 0 1.41 0l2.83-2.83a1 1 0 0 0 0-1.41l-.71-.71 1.41-1.41.72.7z"/>
+                            </svg>
+                            <span className="hidden md:inline">
+                              {linkPanelOpen ? "Hide Link" : "Link Client"}
+                            </span>
+                            <span className="md:hidden">
+                              {linkPanelOpen ? "Hide" : "Link"}
+                            </span>
+                          </span>
+                        </button>
+                        <button
+                          onClick={() => { void toggleNotificationsForSelectedClient(); }}
+                          className={cx(
+                            headerBtnBase,
+                            "h-8 px-2.5",
+                            selected?.notificationsEnabled
+                              ? "border-cyan-500/50 text-cyan-200 bg-white/[0.04]"
+                              : "border-white/10 text-slate-200"
+                          )}
+                          aria-pressed={!!selected?.notificationsEnabled}
+                          title="Toggle push notifications for this client"
+                        >
+                          <span className="inline-flex items-center gap-1.5">
+                            <svg viewBox="0 0 20 20" className="w-4 h-4" aria-hidden="true">
+                              <path fill="currentColor" d="M10 18a2 2 0 0 0 2-2H8a2 2 0 0 0 2 2zm6-6V9a6 6 0 1 0-12 0v3L2 14v1h16v-1l-2-2z"/>
+                            </svg>
+                            <span>{selected?.notificationsEnabled ? "Notify: On" : "Notify: Off"}</span>
+                          </span>
+                        </button>
+                        <button
+                          ref={clientCloseRef}
+                          onClick={() => {
+                            setPaneOpen(false);
+                            setSelected(null);
+                            setSelectedProjectId(null);
+                            setLinkPanelOpen(false);
+                          }}
+                          className={cx(headerBtnBase, "h-8 px-2.5 border-white/10 text-slate-200")}
+                          title="Deselect client"
+                        >
+                          <span className="inline-flex items-center gap-1.5">
+                            <svg viewBox="0 0 20 20" className="w-4 h-4" aria-hidden="true">
+                              <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                            </svg>
+                            <span className="hidden md:inline">Deselect</span>
+                            <span className="md:hidden">Close</span>
+                          </span>
                         </button>
                       </div>
+                    </div>
+                  </div>
 
-                      {inviteError ? <div className="text-sm text-rose-400">{inviteError}</div> : null}
-                      {inviteUrl ? (
-                        <div className="flex items-center gap-2">
-                          <input
-                            readOnly
-                            value={inviteUrl}
-                            className="flex-1 rounded-md border border-white/10 bg-white/[0.05] px-3 py-2 text-xs"
-                          />
+                  <div className="flex-1 overflow-y-auto p-4">
+                    {linkPanelOpen && (
+                      <div className="mb-4 rounded-lg border border-cyan-500/40 bg-white/[0.03] p-3 space-y-4">
+                        <div className="flex items-center justify-between">
+                          <div className="font-medium">Link this client to CC</div>
                           <button
-                            onClick={async () => { try { await navigator.clipboard.writeText(inviteUrl); } catch {} }}
-                            className="px-3 py-2 rounded-md border border-white/10 hover:bg-white/[0.06] text-xs"
-                            title="Copy link"
+                            onClick={async () => {
+                              if (!user || !selected || inviteBusy) return;
+                              setInviteBusy(true);
+                              setInviteError(null);
+                              setInviteUrl(null);
+                              try {
+                                const res = await createInvite({
+                                  ownerId: user.uid,
+                                  clientId: selected.id,
+                                  clientDisplayName: selected.displayName,
+                                });
+                                setInviteUrl(res.url);
+                              } catch (e) {
+                                setInviteError("Failed to create invite");
+                              } finally {
+                                setInviteBusy(false);
+                              }
+                            }}
+                            className="px-3 py-1.5 rounded-md bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white text-xs hover:opacity-95 active:scale-[.98] disabled:opacity-60"
+                            disabled={inviteBusy}
+                            title="Generate invite link"
                           >
-                            Copy
+                            {inviteBusy ? "Generating…" : "Generate Link"}
                           </button>
                         </div>
-                      ) : (
-                        <div className="text-[11px] text-slate-400">
-                          Generate a link and share it with the client. When they accept, they can chat with you in CC.
-                        </div>
-                      )}
 
-                      <div className="pt-2 border-t border-white/10">
-                        <div className="text-[12px] uppercase tracking-wide text-slate-400 mb-2">Active Invites</div>
-                        <ul className="space-y-2">
-                          {invitesForClient.length > 0 ? (
-                            invitesForClient.map((inv) => (
-                              <li key={inv.token} className="flex items-center justify-between text-sm">
-                                <div className="flex items-center gap-2">
-                                  <span className="px-2 py-0.5 rounded bg-white/[0.06] border border-white/10 text-[11px]">
-                                    {inv.token.slice(0, 6)}…
-                                  </span>
-                                  <span className="text-slate-400">{inv.status}</span>
-                                  {inv.expiresAt ? (
-                                    <span className="text-slate-500 text-xs">
-                                      • expires {new Date(inv.expiresAt.toMillis()).toLocaleDateString()}
+                        {inviteError ? <div className="text-sm text-rose-400">{inviteError}</div> : null}
+                        {inviteUrl ? (
+                          <div className="flex items-center gap-2">
+                            <input
+                              readOnly
+                              value={inviteUrl}
+                              className="flex-1 rounded-md border border-white/10 bg-white/[0.05] px-3 py-2 text-xs"
+                            />
+                            <button
+                              onClick={async () => { try { await navigator.clipboard.writeText(inviteUrl); } catch {} }}
+                              className="px-3 py-2 rounded-md border border-white/10 hover:bg-white/[0.06] text-xs"
+                              title="Copy link"
+                            >
+                              Copy
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="text-[11px] text-slate-400">
+                            Generate a link and share it with the client. When they accept, they can chat with you in CC.
+                          </div>
+                        )}
+
+                        <div className="pt-2 border-t border-white/10">
+                          <div className="text-[12px] uppercase tracking-wide text-slate-400 mb-2">Active Invites</div>
+                          <ul className="space-y-2">
+                            {invitesForClient.length > 0 ? (
+                              invitesForClient.map((inv) => (
+                                <li key={inv.token} className="flex items-center justify-between text-sm">
+                                  <div className="flex items-center gap-2">
+                                    <span className="px-2 py-0.5 rounded bg-white/[0.06] border border-white/10 text-[11px]">
+                                      {inv.token.slice(0, 6)}…
                                     </span>
-                                  ) : null}
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  {inv.status === "active" ? (
+                                    <span className="text-slate-400">{inv.status}</span>
+                                    {inv.expiresAt ? (
+                                      <span className="text-slate-500 text-xs">
+                                        • expires {new Date(inv.expiresAt.toMillis()).toLocaleDateString()}
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    {inv.status === "active" ? (
+                                      <button
+                                        onClick={async () => {
+                                          if (!user) return;
+                                          try {
+                                            await revokeInvite({ ownerId: user.uid, token: inv.token });
+                                          } catch {}
+                                        }}
+                                        className="px-2 py-1 rounded-md border border-white/10 hover:bg-white/[0.06] text-xs"
+                                        title="Revoke invite"
+                                      >
+                                        Revoke
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                </li>
+                              ))
+                            ) : (
+                              <li className="text-sm text-slate-500">No invites yet.</li>
+                            )}
+                          </ul>
+                        </div>
+
+                        <div className="pt-2 border-t border-white/10">
+                          <div className="text-[12px] uppercase tracking-wide text-slate-400 mb-2">Linked Users</div>
+                          <ul className="space-y-2">
+                            {linksForClient.length > 0 ? (
+                              linksForClient.map((lnk) => (
+                                <li key={lnk.linkId} className="flex items-center justify-between text-sm">
+                                  <div className="flex items-center gap-2">
+                                    <span className="px-2 py-0.5 rounded bg-white/[0.06] border border-white/10 text-[11px]">
+                                      {lnk.userId.slice(0, 6)}…
+                                    </span>
+                                    <span className="text-slate-400">chat: {lnk.linkId.slice(0, 6)}…</span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      onClick={() => setSelectedChatId(lnk.linkId)}
+                                      className="px-2 py-1 rounded-md border border-cyan-400/40 text-cyan-200 hover:bg-white/[0.06] text-xs"
+                                      title="Open chat with this user"
+                                    >
+                                      Chat
+                                    </button>
                                     <button
                                       onClick={async () => {
-                                        if (!user) return;
+                                        if (!user || !selected) return;
                                         try {
-                                          await revokeInvite({ ownerId: user.uid, token: inv.token });
+                                          await unlinkLinkedUser({
+                                            ownerId: user.uid,
+                                            clientId: selected.id,
+                                            userId: lnk.userId,
+                                          });
                                         } catch {}
                                       }}
                                       className="px-2 py-1 rounded-md border border-white/10 hover:bg-white/[0.06] text-xs"
-                                      title="Revoke invite"
+                                      title="Unlink user"
                                     >
-                                      Revoke
+                                      Unlink
                                     </button>
-                                  ) : null}
-                                </div>
-                              </li>
-                            ))
-                          ) : (
-                            <li className="text-sm text-slate-500">No invites yet.</li>
-                          )}
-                        </ul>
-                      </div>
-
-                      <div className="pt-2 border-t border-white/10">
-                        <div className="text-[12px] uppercase tracking-wide text-slate-400 mb-2">Linked Users</div>
-                        <ul className="space-y-2">
-                          {linksForClient.length > 0 ? (
-                            linksForClient.map((lnk) => (
-                              <li key={lnk.linkId} className="flex items-center justify-between text-sm">
-                                <div className="flex items-center gap-2">
-                                  <span className="px-2 py-0.5 rounded bg-white/[0.06] border border-white/10 text-[11px]">
-                                    {lnk.userId.slice(0, 6)}…
-                                  </span>
-                                  <span className="text-slate-400">chat: {lnk.linkId.slice(0, 6)}…</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <button
-                                    onClick={() => setSelectedChatId(lnk.linkId)}
-                                    className="px-2 py-1 rounded-md border border-cyan-400/40 text-cyan-200 hover:bg-white/[0.06] text-xs"
-                                    title="Open chat with this user"
-                                  >
-                                    Chat
-                                  </button>
-                                  <button
-                                    onClick={async () => {
-                                      if (!user || !selected) return;
-                                      try {
-                                        await unlinkLinkedUser({
-                                          ownerId: user.uid,
-                                          clientId: selected.id,
-                                          userId: lnk.userId,
-                                        });
-                                      } catch {}
-                                    }}
-                                    className="px-2 py-1 rounded-md border border-white/10 hover:bg-white/[0.06] text-xs"
-                                    title="Unlink user"
-                                  >
-                                    Unlink
-                                  </button>
-                                </div>
-                              </li>
-                            ))
-                          ) : (
-                            <li className="text-sm text-slate-500">No linked users yet.</li>
-                          )}
-                        </ul>
-                      </div>
-
-                      {selectedChatId && (
-                        <div className="pt-2 border-t border-white/10">
-                          <div className="flex items-center justify-between mb-2">
-                            <div className="text-[12px] uppercase tracking-wide text-slate-400">Client Chat</div>
-                            <button
-                              onClick={() => setSelectedChatId(null)}
-                              className="px-2 py-1 rounded-md border border-white/10 hover:bg-white/[0.06] text-xs"
-                              title="Close chat"
-                            >
-                              Close
-                            </button>
-                          </div>
-                          <div
-                            ref={chatListRef}
-                            className="h-64 overflow-y-auto rounded-md border border-white/10 bg-white/[0.03] p-3 space-y-2"
-                          >
-                            {chatMessages.map((m) => {
-                              const mine = m.senderId === user?.uid;
-                              const t = m.createdAt?.toDate();
-                              const time = t
-                                ? t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-                                : "";
-                              return (
-                                <div
-                                  key={m.id}
-                                  className={[
-                                    "max-w-[80%] rounded-lg px-3 py-2 text-sm shadow",
-                                    mine ? "ml-auto bg-cyan-600/80 text-white" : "mr-auto bg-white/[0.06] text-slate-100",
-                                  ].join(" ")}
-                                >
-                                  <div>{m.text || "(empty)"}</div>
-                                  <div className={["mt-1 text-[11px]", mine ? "text-cyan-100/80" : "text-slate-400"].join(" ")}>
-                                    {time}
                                   </div>
-                                </div>
-                              );
-                            })}
-                            {chatMessages.length === 0 && (
-                              <div className="text-sm text-slate-500">No messages yet.</div>
+                                </li>
+                              ))
+                            ) : (
+                              <li className="text-sm text-slate-500">No linked users yet.</li>
                             )}
-                          </div>
-                          <div className="mt-2">
-                            <form
-                              onSubmit={(e) => {
-                                e.preventDefault();
-                                if (!user || !selectedChatId || !chatText.trim()) return;
-                                (async () => {
-                                  try {
-                                    setChatBusy(true);
-                                    const t = chatText;
-                                    setChatText("");
-                                    await sendChatMessage({ chatId: selectedChatId, senderId: user.uid, text: t });
-                                  } finally {
-                                    setChatBusy(false);
-                                  }
-                                })();
-                              }}
-                              className="flex items-center gap-2"
-                            >
-                              <input
-                                value={chatText}
-                                onChange={(e) => setChatText(e.target.value)}
-                                placeholder="Type a message…"
-                                className="flex-1 rounded-md border border-white/10 bg-white/[0.05] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-cyan-400/60 placeholder:text-slate-500"
-                              />
-                              <div className="flex items-center gap-2">
-                                <button
-                                  disabled={!chatText.trim() || chatBusy}
-                                  className="px-3 py-2 rounded-md bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white text-xs hover:opacity-95 disabled:opacity-60"
-                                  type="submit"
-                                  title="Send"
-                                >
-                                  Send
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={!chatText.trim() || chatBusy}
-                                  onClick={() => {
-                                    if (!user || !selectedChatId || !chatText.trim()) return;
-                                    (async () => {
-                                      try {
-                                        setChatBusy(true);
-                                        const t = chatText;
-                                        setChatText("");
-                                        await sendChatUpdate({ chatId: selectedChatId, senderId: user.uid, text: t });
-                                      } finally {
-                                        setChatBusy(false);
-                                      }
-                                    })();
-                                  }}
-                                  className="px-3 py-2 rounded-md border border-cyan-400/40 text-cyan-200 hover:bg-white/[0.06] text-xs disabled:opacity-60"
-                                  title="Send Update (alert)"
-                                >
-                                  Send Update
-                                </button>
-                              </div>
-                            </form>
-                          </div>
+                          </ul>
                         </div>
-                      )}
-                    </div>
-                  )}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+                        {selectedChatId && (
+                          <div className="pt-2 border-t border-white/10">
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="text-[12px] uppercase tracking-wide text-slate-400">Client Chat</div>
+                              <button
+                                onClick={() => setSelectedChatId(null)}
+                                className="px-2 py-1 rounded-md border border-white/10 hover:bg-white/[0.06] text-xs"
+                                title="Close chat"
+                              >
+                                Close
+                              </button>
+                            </div>
+                            <div
+                              ref={chatListRef}
+                              className="h-64 overflow-y-auto rounded-md border border-white/10 bg-white/[0.03] p-3 space-y-2 scroll-shadow-y"
+                            >
+                              {chatMessages.map((m) => {
+                                const mine = m.senderId === user?.uid;
+                                const t = m.createdAt?.toDate();
+                                const time = t
+                                  ? t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                                  : "";
+                                return (
+                                  <div
+                                    key={m.id}
+                                    className={[
+                                      "max-w-[80%] rounded-lg px-3 py-2 text-sm shadow",
+                                      mine ? "ml-auto bg-cyan-600/80 text-white" : "mr-auto bg-white/[0.06] text-slate-100",
+                                    ].join(" ")}
+                                  >
+                                    <div>{m.text || "(empty)"}</div>
+                                    <div className={["mt-1 text-[11px]", mine ? "text-cyan-100/80" : "text-slate-400"].join(" ")}>
+                                      {time}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                              {chatMessages.length === 0 && (
+                                <div className="text-sm text-slate-500">No messages yet.</div>
+                              )}
+                            </div>
+                            <div className="mt-2">
+                              <form
+                                onSubmit={(e) => {
+                                  e.preventDefault();
+                                  if (!user || !selectedChatId || !chatText.trim()) return;
+                                  (async () => {
+                                    try {
+                                      setChatBusy(true);
+                                      const t = chatText;
+                                      setChatText("");
+                                      await sendChatMessage({ chatId: selectedChatId, senderId: user.uid, text: t });
+                                    } finally {
+                                      setChatBusy(false);
+                                    }
+                                  })();
+                                }}
+                                className="flex items-center gap-2"
+                              >
+                                <input
+                                  value={chatText}
+                                  onChange={(e) => setChatText(e.target.value)}
+                                  placeholder="Type a message…"
+                                  className="flex-1 rounded-md border border-white/10 bg-white/[0.05] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-cyan-400/60 placeholder:text-slate-500"
+                                />
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    disabled={!chatText.trim() || chatBusy}
+                                    className="px-3 py-2 rounded-md bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white text-xs hover:opacity-95 disabled:opacity-60"
+                                    type="submit"
+                                    title="Send"
+                                  >
+                                    Send
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={!chatText.trim() || chatBusy}
+                                    onClick={() => {
+                                      if (!user || !selectedChatId || !chatText.trim()) return;
+                                      (async () => {
+                                        try {
+                                          setChatBusy(true);
+                                          const t = chatText;
+                                          setChatText("");
+                                          await sendChatUpdate({ chatId: selectedChatId, senderId: user.uid, text: t });
+                                        } finally {
+                                          setChatBusy(false);
+                                        }
+                                      })();
+                                    }}
+                                    className="px-3 py-2 rounded-md border border-cyan-400/40 text-cyan-200 hover:bg-white/[0.06] text-xs disabled:opacity-60"
+                                    title="Send Update (alert)"
+                                  >
+                                    Send Update
+                                  </button>
+                                </div>
+                              </form>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     {/* Projects */}
-                    <section className="rounded-lg border border-white/10 bg-white/[0.03] h-full max-h-[60vh] flex flex-col">
-                      <div className="p-3 border-b border-white/10 flex items-center justify-between bg-white/[0.02]">
+                    <section className="rounded-lg border border-white/10 bg-white/[0.03] h-full flex flex-col">
+                      <div className="p-4 border-b border-white/10 flex items-center justify-between bg-white/[0.02]">
                         <h3 className="font-medium">Projects</h3>
                         <button
                           onClick={() => {
@@ -2109,7 +2439,7 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
                           </div>
                         </div>
                       )}
-                      <ul className="divide-y-2 divide-white/20 flex-1 min-h-0 overflow-y-auto">
+                      <ul className="divide-y-2 divide-white/20 flex-1 min-h-0 overflow-y-auto scroll-shadow-y pr-1">
                         {projectsLoading && projects.length === 0 ? (
                           <>
                             {Array.from({ length: 3 }).map((_, i) => (
@@ -2168,328 +2498,190 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
                         )}
                       </ul>
                     </section>
-
-                    {/* Notes (aggregated, navigates to project notes for editing) */}
-                    <section className="rounded-lg border border-white/10 bg-white/[0.03] h-full max-h-[60vh] flex flex-col">
-                      <div className="p-3 border-b border-white/10 flex items-center justify-between bg-white/[0.02]">
-                        <h3 className="font-medium">Notes</h3>
-                        <button
-                          onClick={() => {
-                            setNoteComposeOpen((v) => !v);
-                            if (!noteComposeOpen) {
-                              const defaultPid = selectedProjectId ?? (projects[0]?.id ?? null);
-                              setNoteComposeProjectId(defaultPid);
-                              setTimeout(() => noteComposeInputRef.current?.focus(), 0);
-                            }
-                          }}
-                          className="px-2 py-1 rounded-md bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white text-sm hover:opacity-95 active:scale-[.98] transition"
-                          title={noteComposeOpen ? "Cancel adding note" : "Add note"}
-                        >
-                          {noteComposeOpen ? "Cancel" : "+ Add"}
-                        </button>
-                      </div>
-                      {noteComposeOpen && (
-                        <div className="px-3 pt-3">
-                          <div className="flex items-center gap-2">
-                            {projects.length > 1 ? (
-                              <select
-                                value={noteComposeProjectId ?? ""}
-                                onChange={(e) => setNoteComposeProjectId(e.target.value || null)}
-                                className="rounded-md border border-white/10 bg-white/[0.05] px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-cyan-400/60"
-                                aria-label="Select project for new note"
-                              >
-                                {projects.map((p) => (
-                                  <option key={p.id} value={p.id}>
-                                    {p.title}
-                                  </option>
-                                ))}
-                              </select>
-                            ) : projects.length === 1 ? (
-                              <div className="text-[11px] text-slate-400">
-                                Project: <span className="text-slate-300">{projects[0].title}</span>
-                              </div>
-                            ) : (
-                              <div className="text-[11px] text-slate-400">
-                                Create a project first to add notes.
-                              </div>
-                            )}
-                          </div>
-                          <div className="mt-2 flex items-center gap-2">
-                            <input
-                              ref={noteComposeInputRef}
-                              value={noteComposeText}
-                              onChange={(e) => setNoteComposeText(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                  e.preventDefault();
-                                  submitNoteCompose();
-                                } else if (e.key === "Escape") {
-                                  e.preventDefault();
-                                  setNoteComposeOpen(false);
-                                }
-                              }}
-                              placeholder="Note text"
-                              className="flex-1 rounded-md border border-white/10 bg-white/[0.05] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-cyan-400/60 placeholder:text-slate-500"
-                              aria-label="New note text"
-                            />
-                            <button
-                              onClick={submitNoteCompose}
-                              disabled={
-                                !noteComposeText.trim() ||
-                                (projects.length > 1 && !noteComposeProjectId)
-                              }
-                              className={cx(
-                                "px-3 py-2 rounded-md text-sm transition",
-                                noteComposeText.trim() && (projects.length === 1 || noteComposeProjectId)
-                                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white hover:opacity-95 active:scale-[.98]"
-                                  : "bg-white/[0.06] text-slate-400 cursor-not-allowed"
-                              )}
-                              title="Create note"
-                            >
-                              Create
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                      <ul className="divide-y-2 divide-white/20 flex-1 min-h-0 overflow-y-auto">
-                        {projectsLoading && aggregatedNotes.length === 0 ? (
-                          <>
-                            {Array.from({ length: 4 }).map((_, i) => (
-                              <li key={i} className="p-3">
-                                <Skeleton className="h-10 bg-white/[0.06]" />
-                              </li>
-                            ))}
-                          </>
-                        ) : aggregatedNotes.length > 0 ? (
-                          aggregatedNotes.map((n, idx) => (
-                            <li key={`${n.projectId}:${n.id}`} onContextMenu={(e) => openContextMenu(e, { kind: "note", note: n })} className="p-3">
-                              <button
-                                onClick={() =>
-                                  openProjectByIdAndFocusNote(n.projectId, n.id)
-                                }
-                                className="w-full text-left group active:scale-[.99] transition"
-                                title={`Go to note (Project: ${
-                                  projectById[n.projectId]?.title ?? n.projectId
-                                })`}
-                              >
-                                <div className="text-sm group-hover:underline decoration-cyan-400">
-                                  {n.text || "(empty)"}
-                                </div>
-                                <div className="text-[11px] text-slate-400 mt-1">
-                                  {projectById[n.projectId]?.title ?? "Project"}
-                                  {" • "}#{idx + 1}
-                                </div>
-                              </button>
-                            </li>
-                          ))
-                        ) : (
-                          <li className="p-3 text-sm text-slate-500">
-                            No notes yet.
-                          </li>
-                        )}
-                      </ul>
-                    </section>
                   </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Commission slide-out panel (notes editing inline here) - Only shows when project is actually loaded */}
-          {projectPaneOpen && (
-            <div
-              className={cx(
-                "absolute top-0 right-0 h-full w-[420px] bg-white/[0.05] backdrop-blur-xl border-l border-white/10 shadow-2xl transition-transform duration-300 ease-[var(--ease-snap)] will-change-transform flex flex-col",
-                projectPaneOpen ? "translate-x-0 pointer-events-auto" : "translate-x-full pointer-events-none"
-              )}
-              aria-hidden={!projectPaneOpen}
-            >
-              <div className="p-4 border-b border-white/10 flex items-center justify-between bg-gradient-to-l from-cyan-500/10 to-transparent">
-                <div>
-                  <div className="text-lg font-semibold">Commission</div>
-                  <div className="text-xs text-slate-400">
-                    {projectLive ? projectLive.status.replace("_", " ") : ""}
-                  </div>
-                </div>
-                <button
-                  ref={projectCloseRef}
-                  onClick={() => setSelectedProjectId(null)}
-                  className="px-3 py-1.5 rounded-md border border-white/10 hover:bg-white/[0.06] active:scale-[.98] transition"
-                  title="Close commission"
-                >
-                  Close
-                </button>
-              </div>
-
-              {projectLive ? (
-                <div className="flex-1 min-h-0 p-4 flex flex-col gap-5">
-                  {/* Title */}
-                  <div>
-                    <label className="block text-sm font-medium mb-1">
-                      Title
-                    </label>
-                    <input
-                      className="w-full rounded-md border border-white/10 bg-white/[0.05] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-cyan-400/60"
-                      value={projectLive.title ?? ""}
-                      onChange={(e) => updateProject({ title: e.target.value })}
-                    />
-                  </div>
-
-                  {/* Status */}
-                  <div>
-                    <label className="block text-sm font-medium mb-1">
-                      Status
-                    </label>
-                    <div className="inline-flex rounded-md border border-white/10 overflow-hidden bg-white/[0.04]">
-                      {(["pending", "in_progress", "completed"] as const).map(
-                        (s) => (
-                          <button
-                            key={s}
-                            onClick={() => updateProject({ status: s })}
-                            className={cx(
-                              "px-3 py-1.5 text-sm transition-colors",
-                              projectLive.status === s
-                                ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white"
-                                : "bg-transparent hover:bg-white/[0.06]"
-                            )}
-                          >
-                            {s === "in_progress"
-                              ? "In Progress"
-                              : s[0].toUpperCase() + s.slice(1)}
-                          </button>
-                        )
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Completion */}
-                  <div>
-                    <label className="block text-sm font-medium mb-2">
-                      Completion: {Math.round(projectLive.completion ?? 0)}%
-                    </label>
-                    <div className="rounded-md border border-white/10 bg-white/[0.04] p-3">
-                      <input
-                        type="range"
-                        min={0}
-                        max={100}
-                        step={5}
-                        value={projectLive.completion ?? 0}
-                        onChange={(e) =>
-                          updateProject({ completion: Number(e.target.value) })
-                        }
-                        className="w-full accent-cyan-400"
-                        aria-label="Completion"
-                      />
-                      <div className="mt-2 h-2 rounded bg-white/[0.06] overflow-hidden">
-                        <div
-                          className="h-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 transition-[width] duration-300 ease-[var(--ease-snap)]"
-                          style={{
-                            width: `${Math.round(projectLive.completion ?? 0)}%`,
-                          }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Project Notes: now the sole place to edit notes */}
-                  {selectedProjectId ? (
-                    <div className="mt-4 flex-1 min-h-0 flex flex-col">
-                      <div className="flex items-center justify-between mb-2">
-                        <label className="text-sm font-medium">Notes</label>
-                        <button
-                          onClick={() => {
-                            setCommissionNoteComposeOpen((v) => !v);
-                            if (!commissionNoteComposeOpen) {
-                              setTimeout(() => commissionNoteComposeInputRef.current?.focus(), 0);
-                            }
-                          }}
-                          className="px-2 py-1 rounded-md bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white text-xs hover:opacity-95 active:scale-[.98] transition"
-                          title={commissionNoteComposeOpen ? "Cancel adding note" : "Add note"}
-                        >
-                          {commissionNoteComposeOpen ? "Cancel" : "+ Add"}
-                        </button>
-                      </div>
-                      {commissionNoteComposeOpen && (
-                        <div className="mb-2">
-                          <div className="flex items-center gap-2">
-                            <input
-                              ref={commissionNoteComposeInputRef}
-                              value={commissionNoteComposeText}
-                              onChange={(e) => setCommissionNoteComposeText(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                  e.preventDefault();
-                                  submitCommissionNoteCompose();
-                                } else if (e.key === "Escape") {
-                                  e.preventDefault();
-                                  setCommissionNoteComposeOpen(false);
-                                }
-                              }}
-                              placeholder="Note text"
-                              className="flex-1 rounded-md border border-white/10 bg-white/[0.05] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-cyan-400/60 placeholder:text-slate-500"
-                              aria-label="New note text (commission)"
-                            />
-                            <button
-                              onClick={submitCommissionNoteCompose}
-                              disabled={!commissionNoteComposeText.trim()}
-                              className={cx(
-                                "px-3 py-2 rounded-md text-xs transition",
-                                commissionNoteComposeText.trim()
-                                  ? "bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white hover:opacity-95 active:scale-[.98]"
-                                  : "bg-white/[0.06] text-slate-400 cursor-not-allowed"
-                              )}
-                              title="Create note"
-                            >
-                              Create
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                      <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-1">
-                        {(projectNotes[selectedProjectId] ?? []).map((n) => {
-                          const flash = n.id === flashNoteId;
-                          return (
-                            <div
-                              key={n.id}
-                              id={`note-${n.id}`}
-                              className={cx(
-                                "border border-white/10 rounded-md bg-white/[0.04] transition-shadow",
-                                flash &&
-                                  "ring-1 ring-cyan-400/60 shadow-[0_0_0_1px_rgba(34,211,238,.35)_inset]"
-                              )}
-                            >
-                              <textarea
-                                defaultValue={n.text ?? ""}
-                                onBlur={(e) =>
-                                  updateProjectNoteText(
-                                    selectedProjectId,
-                                    n.id,
-                                    e.target.value
-                                  )
-                                }
-                                className="w-full resize-none p-2 text-sm outline-none focus:ring-2 focus:ring-cyan-400/60 bg-transparent"
-                                rows={3}
-                                placeholder="Note..."
-                              />
-                            </div>
-                          );
-                        })}
-                        {(projectNotes[selectedProjectId] ?? []).length === 0 && (
-                          <div className="text-sm text-slate-500">
-                            No notes yet.
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ) : null}
                 </div>
               ) : (
-                <div className="p-4 text-sm text-slate-500">
-                  Loading commission...
+                <div className="h-full grid place-items-center text-slate-500">
+                  <div className="text-center px-6">
+                    <h1 className="text-2xl font-semibold mb-2">
+                      <span className="text-gradient">ZZQ</span>
+                    </h1>
+                    <p className="max-w-sm mx-auto">
+                      Select a client from the left to manage projects.
+                    </p>
+                  </div>
                 </div>
               )}
-            </div>
-          )}
+            </aside>
+
+            {/* Right panel: Project View + Notes for the Opened Project */}
+            <section className="flex-1 h-full bg-white/[0.04] backdrop-blur-md">
+              {selected && selectedProjectId ? (
+                projectLive ? (
+                  <div className="h-full flex flex-col">
+                    <div className="p-4 border-b border-white/10 bg-gradient-to-l from-cyan-500/10 to-transparent">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div
+                            className="text-lg md:text-xl font-semibold tracking-tight outline-none focus:ring-2 focus:ring-cyan-400/60 rounded"
+                            contentEditable
+                            suppressContentEditableWarning
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                (e.currentTarget as HTMLElement).blur();
+                              }
+                            }}
+                            onBlur={(e) => {
+                              const v = e.currentTarget.innerText.trim();
+                              const current = projectLive?.title ?? "";
+                              if (v && v !== current) {
+                                void updateProject({ title: v });
+                              } else if (!v && current) {
+                                void updateProject({ title: "" });
+                              }
+                            }}
+                            title="Click to edit title. Press Enter to save."
+                          >
+                            {projectLive.title || "Untitled Commission"}
+                          </div>
+                          <div className="mt-1 flex items-center gap-2 text-xs text-slate-400">
+                            <button
+                              onClick={cycleStatus}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-white/10 bg-white/[0.03] hover:bg-white/[0.06] transition"
+                              title={`Click to change status (now: ${statusLabel(projectLive.status)})`}
+                            >
+                              <StatusBadge status={projectLive.status} />
+                            </button>
+                            <button
+                              onClick={cycleCompletion}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-white/10 bg-white/[0.03] hover:bg-white/[0.06] transition"
+                              title="Click to cycle completion (0→25→50→75→100)"
+                            >
+                              {Math.round(projectLive.completion ?? 0)}% complete
+                            </button>
+                          </div>
+                          <div className="mt-2 h-1 rounded bg-white/[0.06] overflow-hidden">
+                            <div
+                              style={{ width: `${Math.round(projectLive.completion ?? 0)}%` }}
+                              className="h-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 transition-[width] duration-300"
+                            />
+                          </div>
+                        </div>
+                        <div className="shrink-0">
+                          <button
+                            ref={projectCloseRef}
+                            onClick={() => setSelectedProjectId(null)}
+                            className="px-2.5 py-1.5 rounded-md border border-white/10 hover:bg-white/[0.06] active:scale-[.98] transition focus-visible:ring-2 focus-visible:ring-cyan-400/60"
+                            title="Deselect project"
+                          >
+                            <span className="inline-flex items-center gap-1.5">
+                              <svg viewBox="0 0 20 20" className="w-4 h-4" aria-hidden="true">
+                                <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                              </svg>
+                              <span className="hidden md:inline">Close</span>
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex-1 min-h-0 p-4 flex flex-col gap-4">
+                      {/* Project Notes (naturalized) */}
+                      {selectedProjectId ? (
+                        <div className="mt-2 flex-1 min-h-0 flex flex-col">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="text-sm font-medium">Notes</div>
+                            <button
+                              onClick={createAndEditCommissionNote}
+                              className="px-2 py-1 rounded-md border border-white/10 hover:bg-white/[0.06] text-xs"
+                              title="New note"
+                            >
+                              New
+                            </button>
+                          </div>
+                          <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-1">
+                            {(projectNotes[selectedProjectId] ?? []).map((n) => {
+                              const flash = n.id === flashNoteId;
+                              const isEditing = editingNoteId === n.id;
+                              const draft = noteDrafts[n.id] ?? n.text ?? "";
+                              return (
+                                <div
+                                  key={n.id}
+                                  id={`note-${n.id}`}
+                                  onContextMenu={(e) =>
+                                    openContextMenu(e, {
+                                      kind: "note",
+                                      note: { id: n.id, text: n.text, projectId: selectedProjectId ?? undefined },
+                                      projectIdForNote: selectedProjectId ?? undefined,
+                                    })
+                                  }
+                                  className={cx(
+                                    "border border-white/10 rounded-md bg-white/[0.04] transition-shadow",
+                                    flash && "ring-1 ring-cyan-400/60 shadow-[0_0_0_1px_rgba(34,211,238,.35)_inset]"
+                                  )}
+                                >
+                                  {isEditing ? (
+                                    <textarea
+                                      value={draft}
+                                      onChange={(e) =>
+                                        setNoteDrafts((prev) => ({ ...prev, [n.id]: e.target.value }))
+                                      }
+                                      onInput={(e) => autoResize(e.currentTarget)}
+                                      onFocus={(e) => autoResize(e.currentTarget)}
+                                      onBlur={(e) => {
+                                        void updateProjectNoteText(selectedProjectId, n.id, e.target.value);
+                                        setEditingNoteId((cur) => (cur === n.id ? null : cur));
+                                      }}
+                                      className="w-full resize-none p-2 text-sm outline-none focus:ring-2 focus:ring-cyan-400/60 bg-transparent"
+                                      rows={3}
+                                      placeholder="Write in Markdown… (--- for a page break)"
+                                    />
+                                  ) : draft.trim() ? (
+                                    <div
+                                      className="p-2 text-sm cursor-text hover:bg-white/[0.02] transition"
+                                      onClick={() => startEditNote(n.id, n.text ?? "")}
+                                    >
+                                      <MarkdownView text={draft} />
+                                    </div>
+                                  ) : (
+                                    <div
+                                      className="p-2 text-sm italic text-slate-500 cursor-text hover:bg-white/[0.02] transition"
+                                      onClick={() => startEditNote(n.id, n.text ?? "")}
+                                    >
+                                      Click to write…
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            {(projectNotes[selectedProjectId] ?? []).length === 0 && (
+                              <div className="text-sm text-slate-500">No notes yet.</div>
+                            )}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="h-full grid place-items-center text-slate-500 p-6">
+                    <div className="text-sm">Loading project…</div>
+                  </div>
+                )
+              ) : (
+                <div className="h-full grid place-items-center text-slate-500 p-6">
+                  <div className="text-center">
+                    <div className="text-xl font-medium mb-1">No project selected</div>
+                    <p className="text-sm text-slate-400">
+                      {selected ? "Choose a project from the middle panel to view details and notes." : "Select a client to get started."}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </section>
+          </div>
+
+
         </main>
       </div>
     </div>

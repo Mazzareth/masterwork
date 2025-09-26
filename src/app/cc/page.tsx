@@ -157,97 +157,91 @@ export default function CCPage() {
   }
 
   return (
-    <div className="min-h-screen p-6">
-      <div className="mx-auto w-full max-w-2xl flex flex-col gap-6">
+    <div className="min-h-screen zzq-bg">
+      <div className="mx-auto w-full max-w-3xl px-4 py-8 flex flex-col gap-6 zzq-viewport">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-semibold">CC</h1>
+          <div>
+            <h1 className="text-3xl font-semibold text-gradient">Client Console</h1>
+            <p className="text-sm text-neutral-400 mt-1">Chats, updates, and commission progress</p>
+          </div>
           <Link
             href="/"
-            className="px-3 py-2 rounded border border-neutral-300 hover:bg-neutral-100 text-sm"
+            className="px-3 py-2 rounded-md border border-neutral-700 hover:bg-neutral-900 text-sm"
           >
-            Back to Home
+            Home
           </Link>
         </div>
 
-        {/* Notifications / New Messages */}
-        <section className="rounded-lg border border-neutral-200 overflow-hidden">
-          <div className="px-4 py-3 border-b border-neutral-200 bg-neutral-50 flex items-center justify-between">
-            <div className="font-medium">Notifications</div>
-            <button
-              onClick={() => { if (user) void ensurePushPermissionAndToken(user.uid); }}
-              className="px-3 py-1.5 rounded-md border border-neutral-300 text-sm hover:bg-neutral-100"
-              title="Enable push notifications"
-            >
-              Enable Push
-            </button>
-          </div>
-          <ul className="divide-y divide-neutral-200">
-            {displayChats.filter((c) => {
-              const lm = c.lastMessageAt?.toMillis?.() ?? 0;
-              const lr = c.lastReadAt?.toMillis?.() ?? 0;
-              return lm > 0 && lm > lr;
-            }).map((c) => (
-              <li key={`notif-${c.chatId}`} className="p-4">
-                <Link href={`/cc/chat/${encodeURIComponent(c.chatId)}`} className="flex items-center justify-between group">
-                  <div>
-                    <div className="font-medium group-hover:underline">{c.clientDisplayName || "Client"}</div>
-                    <div className="text-xs text-neutral-500 mt-0.5">
-                      {c.chatId.slice(0, 8)}… • New messages
-                    </div>
-                  </div>
-                  <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] rounded bg-red-500 text-white">
-                    New
-                  </span>
-                </Link>
-              </li>
-            ))}
-            {displayChats.filter((c) => {
-              const lm = c.lastMessageAt?.toMillis?.() ?? 0;
-              const lr = c.lastReadAt?.toMillis?.() ?? 0;
-              return lm > 0 && lm > lr;
-            }).length === 0 && (
-              <li className="p-6 text-sm text-neutral-500">No new messages.</li>
-            )}
-          </ul>
-        </section>
+        <div className="flex items-center gap-2">
+          <input
+            placeholder="Search chats…"
+            className="flex-1 rounded-md border border-neutral-700 bg-black/20 px-3 py-2 text-sm text-neutral-200 placeholder:text-neutral-500 outline-none focus:ring-2 focus:ring-cyan-500"
+          />
+          <button
+            onClick={() => { if (user) void ensurePushPermissionAndToken(user.uid); }}
+            className="px-3 py-2 rounded-md bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white text-sm shadow hover:opacity-90"
+            title="Enable push notifications"
+          >
+            Enable Push
+          </button>
+        </div>
 
-        {/* Chats */}
-        <section className="rounded-lg border border-neutral-200 overflow-hidden">
-          <div className="px-4 py-3 border-b border-neutral-200 bg-neutral-50">
-            <div className="font-medium">Chats</div>
+        <section className="rounded-xl border border-neutral-800 bg-black/20 overflow-hidden">
+          <div className="px-4 py-3 border-b border-neutral-800">
+            <div className="font-medium text-neutral-200">Inbox</div>
           </div>
-          <ul className="divide-y divide-neutral-200">
+          <ul className="divide-y divide-neutral-900">
             {displayChats.length > 0 ? (
-              displayChats.map((c) => (
-                <li key={c.chatId} className="p-4">
-                  <Link
-                    href={`/cc/chat/${encodeURIComponent(c.chatId)}`}
-                    className="flex items-center justify-between group"
-                  >
-                    <div>
-                      <div className="font-medium group-hover:underline">
-                        {c.clientDisplayName || "Client"}{" "}
-                        {(c.lastMessageAt && (!c.lastReadAt || ((c.lastReadAt.toMillis?.() ?? 0) < (c.lastMessageAt.toMillis?.() ?? 0)))) ? (
-                          <span className="ml-2 inline-block px-1.5 py-0.5 text-[10px] rounded bg-red-500 text-white align-middle">New</span>
-                        ) : null}
+              displayChats.map((c) => {
+                const name = c.clientDisplayName || "Client";
+                const initial = name.trim().charAt(0).toUpperCase();
+                const lm = c.lastMessageAt?.toMillis?.() ?? 0;
+                const lr = c.lastReadAt?.toMillis?.() ?? 0;
+                const unread = lm > 0 && lm > lr;
+                const lastDate = c.lastMessageAt?.toDate?.();
+                const lastStr = lastDate
+                  ? lastDate.toLocaleDateString([], { month: "short", day: "numeric" })
+                  : "";
+                const progress = progressByChat[c.chatId];
+                return (
+                  <li key={c.chatId}>
+                    <Link
+                      href={`/cc/chat/${encodeURIComponent(c.chatId)}`}
+                      className="group flex items-center gap-3 p-4 hover:bg-white/5 transition"
+                    >
+                      <div className="size-10 rounded-full bg-gradient-to-br from-cyan-500 to-fuchsia-500 text-white grid place-items-center font-semibold">
+                        {initial || "C"}
                       </div>
-                      <div className="text-xs text-neutral-500 mt-0.5">
-                        {typeof progressByChat[c.chatId] === "number" ? (
-                          <>
-                            Progress: {progressByChat[c.chatId]}% •{" "}
-                          </>
-                        ) : null}
-                        Chat ID: {c.chatId.slice(0, 8)}…
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="truncate font-medium text-neutral-100">
+                            {name}
+                          </div>
+                          <div className="shrink-0 text-xs text-neutral-500">
+                            {lastStr}
+                          </div>
+                        </div>
+                        <div className="mt-1 text-xs text-neutral-400 truncate">
+                          Chat ID: {c.chatId.slice(0, 8)}…
+                          {typeof progress === "number" && (
+                            <span className="ml-2 inline-flex items-center rounded-full border border-neutral-700 text-neutral-300 px-2 py-0.5">
+                              {progress}% done
+                            </span>
+                          )}
+                          {unread && (
+                            <span className="ml-2 inline-block rounded-full bg-red-500/20 text-red-300 px-2 py-0.5 text-[10px] align-middle">
+                              New
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                    <span className="text-neutral-400 group-hover:text-neutral-600 transition">
-                      →
-                    </span>
-                  </Link>
-                </li>
-              ))
+                      <span className="text-neutral-600 group-hover:text-neutral-300 transition">→</span>
+                    </Link>
+                  </li>
+                );
+              })
             ) : (
-              <li className="p-6 text-sm text-neutral-500">No linked chats yet.</li>
+              <li className="p-6 text-sm text-neutral-400">No linked chats yet.</li>
             )}
           </ul>
         </section>

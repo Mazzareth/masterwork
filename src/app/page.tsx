@@ -26,38 +26,6 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-neutral-50 to-neutral-100 dark:from-neutral-950 dark:to-black">
-      <nav className="sticky top-0 z-10 border-b border-neutral-200/60 dark:border-neutral-800/60 backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:supports-[backdrop-filter]:bg-neutral-950/40">
-        <div className="mx-auto max-w-5xl px-4 py-3 flex items-center justify-end gap-3">
-          {!user ? (
-            <button
-              onClick={loginWithGoogle}
-              className="px-4 py-2 rounded-md bg-black text-white hover:bg-neutral-800 active:bg-neutral-900 transition"
-            >
-              Login with Google
-            </button>
-          ) : (
-            <>
-              {profile?.photoURL ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={profile.photoURL}
-                  alt="avatar"
-                  className="w-8 h-8 rounded-full ring-1 ring-black/5"
-                />
-              ) : null}
-              <span className="text-sm text-neutral-600 dark:text-neutral-300">
-                {profile?.displayName ?? profile?.email ?? user.uid}
-              </span>
-              <button
-                onClick={logout}
-                className="px-3 py-2 rounded-md border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition"
-              >
-                Logout
-              </button>
-            </>
-          )}
-        </div>
-      </nav>
 
       <main className="mx-auto max-w-5xl px-4 py-16">
         {loading ? (

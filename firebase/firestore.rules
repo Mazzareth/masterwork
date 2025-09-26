@@ -51,15 +51,15 @@ service cloud.firestore {
       allow get: if isSignedIn()
                  && resource.data.status == "active"
                  && notExpired(resource.data.expiresAt);
-
+  
       // Only the owner can list their invites
       allow list: if isOwner(ownerId);
-
+  
       // Owner creates active invite
       allow create: if isOwner(ownerId)
         && request.resource.data.ownerId == ownerId
         && request.resource.data.status == "active";
-
+  
       // Owner may revoke; accepting user may mark as used
       allow update: if (
         // Owner revoke/maintenance (owner cannot directly mark "used")
@@ -72,11 +72,26 @@ service cloud.firestore {
          && request.resource.data.status == "used"
          && request.resource.data.usedBy == request.auth.uid)
       );
-
+  
       // Owner may delete
       allow delete: if isOwner(ownerId);
     }
 
+    // Commission slugs (global, for routing /commission/{slug})
+    match /commissionSlugs/{slug} {
+      // Publicly readable to resolve slugs to ownerId
+      allow get, list: if true;
+
+      // Create only by the owner, and only if not already taken
+      allow create: if isSignedIn()
+        && request.resource.data.ownerId == request.auth.uid
+        && !exists(/databases/$(database)/documents/commissionSlugs/$(slug));
+
+      // Update/Delete only by the owner who owns the slug
+      allow update, delete: if isSignedIn()
+        && resource.data.ownerId == request.auth.uid;
+    }
+  
     // Canonical Chats
     match /chats/{chatId} {
       // Create requires caller to be included in the participants array
@@ -101,10 +116,18 @@ service cloud.firestore {
     }
 
     // Per-user Chat Summaries (owner and client)
+    // Owner's summaries: owner can do anything; chat participants can create/update the owner's summary for discoverability
     match /users/{ownerId}/sites/cc/chats/{chatId} {
-      allow read, write, list: if isOwner(ownerId);
-      allow delete: if isOwner(ownerId);
+      allow read, list, delete: if isOwner(ownerId);
+      allow create, update: if isOwner(ownerId) || (
+        isSignedIn()
+        && (request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants)
+        && request.resource.data.ownerId == ownerId
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.chatId == chatId
+      );
     }
+    // Client/self summaries remain self-owned only
     match /users/{uid}/sites/cc/chats/{chatId} {
       allow read, write, list: if isOwner(uid);
       allow delete: if isOwner(uid);

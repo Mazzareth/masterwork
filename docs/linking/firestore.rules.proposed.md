@@ -88,6 +88,21 @@ service cloud.firestore {
       allow delete: if isOwner(ownerId);
     }
 
+    // ---------- Commission Slugs ----------
+    match /commissionSlugs/{slug} {
+      // Publicly resolvable: contains only ownerId and timestamps
+      allow get, list: if true;
+
+      // Reserve a slug: only by the owner, and only if not already taken
+      allow create: if isSignedIn()
+        && request.resource.data.ownerId == request.auth.uid
+        && !exists(/databases/$(database)/documents/commissionSlugs/$(slug));
+
+      // Manage slug: only by the owning artist
+      allow update, delete: if isSignedIn()
+        && resource.data.ownerId == request.auth.uid;
+    }
+
     // ---------- Canonical Chats ----------
     // Canonical chat doc enforces participants and permission checks.
     match /chats/{chatId} {
@@ -119,10 +134,15 @@ service cloud.firestore {
 
     // ---------- Per-user Chat Summaries (owner and client) ----------
     // These are lightweight views (mirrors) of chat for secure per-user listing in UI.
-    // Owner-side
+    // Owner-side (participants may create/update the owner's summary for discoverability)
     match /users/{ownerId}/sites/cc/chats/{chatId} {
-      allow read, write, list: if isOwner(ownerId);
-      allow delete: if isOwner(ownerId);
+      allow read, list, delete: if isOwner(ownerId);
+      allow create, update: if isOwner(ownerId) || (
+        isSignedIn()
+        && (request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants)
+        && request.resource.data.ownerId == ownerId
+        && request.resource.data.chatId == chatId
+      );
     }
     // Client-side
     match /users/{uid}/sites/cc/chats/{chatId} {

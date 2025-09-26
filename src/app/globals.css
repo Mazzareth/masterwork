@@ -71,7 +71,7 @@ body {
 /* ZZQ Dark theme helpers */
 .zzq-bg {
   --zzq-bg: #070b12;
-  --zzq-top-pad: max(12px, env(safe-area-inset-top));
+  --zzq-top-pad: calc(max(12px, env(safe-area-inset-top)) + 8px);
   padding-top: var(--zzq-top-pad);
   background-color: var(--zzq-bg);
   background-image:
@@ -99,4 +99,10 @@ body {
   background-clip: text;
   color: transparent;
   text-shadow: 0 0 24px rgba(34, 211, 238, 0.2);
+}
+
+/* Scrollable area edge fade for better depth cues */
+.scroll-shadow-y {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, black 16px, black calc(100% - 16px), transparent);
+  mask-image: linear-gradient(to bottom, transparent, black 16px, black calc(100% - 16px), transparent);
 }

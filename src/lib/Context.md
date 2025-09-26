@@ -17,6 +17,11 @@
   - [`subscribeToForegroundMessages()`](src/lib/notifications.ts:96): Foreground FCM listener for in-app toasts.
   - [`getCurrentFcmTokenIfSupported()`](src/lib/notifications.ts:112): Best-effort read of the current device token without prompting.
   - [`disablePushForThisDevice()`](src/lib/notifications.ts:147): Deletes the local FCM token and removes the corresponding `/users/{uid}/notificationTokens/{token}` doc.
+- [src/lib/commission.ts](src/lib/commission.ts)
+  - Commission slugs and commission chat helpers:
+    - [`reserveCommissionSlug()`](src/lib/commission.ts:1) reserves `/commissionSlugs/{slug}` for the owner and writes the owner settings doc.
+    - `computeCommissionChatId()` derives a stable id for (ownerId, slug, userId) commission chats.
+    - `openOrEnsureCommissionChat()` creates the canonical chat with participants and minimal metadata for commission-origin chats.
 
 ## Design Notes
 - Client-only usage: This module is loaded in client components via the consuming contexts/components.

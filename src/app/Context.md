@@ -9,6 +9,9 @@
 - Layout
   - [src/app/layout.tsx](src/app/layout.tsx)
     - Server component that mounts the client-side AuthProvider and sets base fonts and metadata.
+- Header
+  - [src/app/Header.tsx](src/app/Header.tsx)
+    - Global sticky header with navigation (based on `pageVisibility` + Firestore `permissions`) and auth controls. Rendered inside `AuthProvider` in layout.
 - Hub (Main Page)
   - [src/app/page.tsx](src/app/page.tsx)
     - Client component:
@@ -20,6 +23,9 @@
   - [src/app/zzq/page.tsx](src/app/zzq/page.tsx)
   - [src/app/cc/page.tsx](src/app/cc/page.tsx)
   - [src/app/inhouse/page.tsx](src/app/inhouse/page.tsx)
+  - Commission Pages:
+    - Dynamic client entrypoint: [src/app/commission/[slug]/page.tsx](src/app/commission/[slug]/page.tsx)
+    - Artists configure slug in ZZQ Settings; clients visit /commission/{slug}, sign in, and submit a brief to open a chat.
 
 ## Dependencies
 - Auth provider and hooks: [src/contexts/AuthContext.tsx](src/contexts/AuthContext.tsx)
@@ -49,6 +55,11 @@
 - ZZQ UI consistency:
   - Per-project Notes (in Commission) now sort by `createdAt` descending to match the aggregated Notes list.
   - Projects and Notes cards use equal visual height with internal scrolling and thicker separators for clearer grouping. See [`src/app/zzq/page.tsx`](src/app/zzq/page.tsx).
+- Bug fix:
+  - ZZQ sidebar Settings overflow/clipping resolved. The sidebar is now a flex column and the Clients list is flex-1 with internal scroll, replacing the previous fixed calc height. This prevents the Commission Link area from being cut off and keeps "Save" and "Copy" buttons clickable. See [`src/app/zzq/page.tsx`](src/app/zzq/page.tsx).
+- Commission Pages & Settings:
+  - Artists can set a unique commission slug in ZZQ Settings (left header). The chosen slug is reserved globally under `/commissionSlugs/{slug}` and stored at `/users/{uid}/sites/zzq/config/settings.commissionSlug`.
+  - Clients can visit `/commission/{slug}` to authenticate and submit a brief; a chat is created for both participants and the client is redirected to the CC chat.
 - Push Notifications:
   - Device-level enable/disable from the ZZQ sidebar; stores/deletes FCM token under `/users/{uid}/notificationTokens/{token}` via [`ensurePushPermissionAndToken()`](src/lib/notifications.ts:20) and [`disablePushForThisDevice()`](src/lib/notifications.ts:122).
   - Per-client notification preference toggle on the Client View header; writes `notificationsEnabled` on the client doc at `/users/{uid}/sites/zzq/clients/{clientId}` (owner-only).
