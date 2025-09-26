@@ -191,6 +191,97 @@ export default function ZZQPage() {
   const [chatBusy, setChatBusy] = useState(false);
   const chatListRef = useRef<HTMLDivElement | null>(null);
 
+  // AI: ZZQ (DeepSeek) slide-up chat state
+  type AIMessage = { role: "system" | "user" | "assistant" | string; content: string };
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [aiMessages, setAiMessages] = useState<AIMessage[]>([
+    {
+      role: "system",
+      content:
+        "You are ZZQ — an assistant for the artist. You have access to the owner's clients and commission projects provided as context. Answer concisely and reference client/project ids when helpful.",
+    },
+  ]);
+  const [aiInput, setAiInput] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const aiListRef = useRef<HTMLDivElement | null>(null);
+
+  const buildAiContextSystemMessage = () => {
+    // Build a concise context string with clients and known projects (selected client projects are included)
+    const lines: string[] = [];
+    lines.push(`Owner uid: ${user?.uid ?? "unknown"}`);
+    lines.push("");
+    lines.push("Clients:");
+    if (clients.length === 0) {
+      lines.push("- (no clients)");
+    } else {
+      clients.forEach((c) => {
+        lines.push(`- ${c.displayName}${c.username ? ` (${c.username})` : ""} [id:${c.id}]`);
+      });
+    }
+    lines.push("");
+    if (selected) {
+      lines.push(`Projects for selected client (${selected.displayName}):`);
+      if (projects.length === 0) {
+        lines.push("- (no projects)");
+      } else {
+        projects.forEach((p) => {
+          lines.push(`- ${p.title} [id:${p.id}] status:${p.status} completion:${Math.round(p.completion ?? 0)}%`);
+        });
+      }
+    } else {
+      lines.push("No client selected; project details not included.");
+    }
+    lines.push("");
+    lines.push("When answering, be helpful and reference the relevant client/project when appropriate.");
+    return { role: "system", content: lines.join("\n") } as AIMessage;
+  };
+
+  const handleAiSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const q = aiInput.trim();
+    if (!q || aiLoading) return;
+    const userMsg: AIMessage = { role: "user", content: q };
+    setAiMessages((prev) => [...prev, userMsg]);
+    setAiInput("");
+    setAiLoading(true);
+    try {
+      const sys = buildAiContextSystemMessage();
+      const sendMessages = [
+        sys,
+        ...aiMessages.map((m) => ({ role: m.role as string, content: m.content })),
+        userMsg,
+      ];
+      const res = await fetch("/api/deepseek", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "deepseek-chat", messages: sendMessages, stream: false }),
+      });
+      const json = await res.json().catch(() => null);
+      let reply = "";
+      if (json && json.choices && Array.isArray(json.choices) && json.choices[0]?.message?.content) {
+        reply = json.choices[0].message.content;
+      } else if (json && typeof json.output === "string") {
+        reply = json.output;
+      } else if (json && json.data && json.data[0] && json.data[0].text) {
+        reply = json.data[0].text;
+      } else if (typeof json === "string") {
+        reply = json;
+      } else {
+        reply = "Sorry, I couldn't get a response from DeepSeek.";
+      }
+      const assistantMsg: AIMessage = { role: "assistant", content: reply };
+      setAiMessages((prev) => [...prev, assistantMsg]);
+      setTimeout(() => {
+        const el = aiListRef.current;
+        if (el) el.scrollTop = el.scrollHeight;
+      }, 0);
+    } catch (err) {
+      setAiMessages((prev) => [...prev, { role: "assistant", content: "Error: failed to reach DeepSeek." }]);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
   // Projects
 
   // Owner-wide chat summaries (for notifications)
@@ -2683,6 +2774,106 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
 
 
         </main>
+{/* AI Slide-Up Panel (ZZQ — DeepSeek) */}
+<div
+  aria-hidden={!aiPanelOpen}
+  className={cx(
+    "fixed inset-0 z-50 transition-opacity duration-200",
+    aiPanelOpen ? "pointer-events-auto" : "pointer-events-none"
+  )}
+>
+  {/* backdrop */}
+  <div
+    onClick={() => setAiPanelOpen(false)}
+    className={cx(
+      "fixed inset-0 bg-black/50 transition-opacity duration-200",
+      aiPanelOpen ? "opacity-100" : "opacity-0"
+    )}
+  />
+
+  {/* panel */}
+  <div
+    role="dialog"
+    aria-modal="true"
+    aria-label="ZZQ AI chat panel"
+    className={cx(
+      "fixed left-0 right-0 bottom-0 mx-auto w-full max-w-3xl transform transition-transform duration-300",
+      aiPanelOpen ? "translate-y-0" : "translate-y-full"
+    )}
+  >
+    <div className="rounded-t-xl border border-neutral-800 bg-black/90 p-4 backdrop-blur-md text-slate-200">
+      <div className="flex items-center justify-between mb-2">
+        <div>
+          <div className="text-xs text-neutral-400">Chat</div>
+          <div className="font-medium">ZZQ — DeepSeek</div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setAiPanelOpen(false)}
+            className="px-3 py-1 rounded-md border border-white/10 text-sm"
+            title="Close AI panel"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+
+      <div
+        ref={aiListRef}
+        className="h-56 overflow-y-auto rounded-md border border-neutral-800 bg-neutral-900 p-3 space-y-2"
+      >
+        {aiMessages.map((m, idx) => (
+          <div
+            key={idx}
+            className={cx(
+              "rounded-md px-3 py-2 text-sm",
+              m.role === "user"
+                ? "bg-neutral-800 text-neutral-100 ml-auto"
+                : m.role === "assistant"
+                ? "bg-cyan-700/80 text-white"
+                : "bg-white/[0.04] text-slate-200"
+            )}
+          >
+            <div className="text-[11px] text-neutral-300 mb-1">
+              {m.role === "system" ? "Context" : m.role === "assistant" ? "ZZQ" : "You"}
+            </div>
+            <div>{m.content}</div>
+          </div>
+        ))}
+        {aiMessages.length === 0 && (
+          <div className="text-sm text-neutral-500">Ask ZZQ about your clients and projects.</div>
+        )}
+      </div>
+
+      <form onSubmit={handleAiSubmit} className="mt-3 flex items-center gap-2">
+        <input
+          value={aiInput}
+          onChange={(e) => setAiInput(e.target.value)}
+          placeholder="Ask ZZQ about your clients and projects…"
+          className="flex-1 rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm text-neutral-200 placeholder:text-neutral-500 outline-none"
+        />
+        <div className="flex items-center gap-2">
+          <button
+            disabled={!aiInput.trim() || aiLoading}
+            className="px-3 py-2 rounded-md bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white disabled:opacity-60"
+            type="submit"
+          >
+            {aiLoading ? "Thinking…" : "Ask"}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{/* Floating toggle */}
+<button
+  onClick={() => setAiPanelOpen((v) => !v)}
+  className="fixed right-6 bottom-6 z-50 px-4 py-3 rounded-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white shadow-lg hover:scale-[.98] active:scale-[.96]"
+  title="Open ZZQ AI"
+>
+  ZZQ AI
+</button>
       </div>
     </div>
   );

@@ -176,3 +176,20 @@ Would another engineer understand the purpose within 2 minutes? Yes.
 
 Did I explain the functionality clearly in Context.md? Yes.
 Would another engineer understand the purpose of this directory/codebase within 2 minutes? Yes.
+
+## New: ZZQ AI — Slide-Up Chat (DeepSeek)
+- Introduced a floating "ZZQ AI" button (bottom-right) which opens a slide-up chat panel from the bottom of the screen.
+- Panel header: "ZZQ — DeepSeek" (assistant displayed as "ZZQ"), powered by DeepSeek's chat API via a server-side proxy.
+- Behavior:
+  - The panel composes a system message containing the owner's clients and (when selected) that client's projects (ids, status, completion) so ZZQ can answer questions about them.
+  - Client sends an OpenAI-compatible payload to the server proxy at `/api/deepseek`; the proxy forwards the request to DeepSeek and returns the response.
+  - Current implementation is non-streaming (stream: false).
+- Implementation (files):
+  - Server proxy: src/app/api/deepseek/route.ts
+  - UI and panel: src/app/zzq/page.tsx
+- Configuration & Security:
+  - Requires server env var DEEPSEEK_API_KEY to be set (keep secret).
+  - Recommended: add server-side session validation, rate limiting, and request validation before forwarding to DeepSeek.
+  - Avoid sending sensitive fields to the model unless explicitly desired.
+- Notes:
+  - This update is intentionally minimal to demonstrate UI + server proxy integration. For production, implement authentication checks in the proxy and consider streaming responses for better UX.
