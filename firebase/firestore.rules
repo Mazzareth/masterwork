@@ -160,6 +160,24 @@ service cloud.firestore {
       allow read, create, update, delete: if isOwner(uid);
     }
 
+    // Masterwork claimed (invite-only)
+    match /masterwork/claimed/{document=**} {
+      // Access allowed if:
+      // - Authenticated user with email mercysquadrant@gmail.com (admin), OR
+      // - A document exists in the allowlist collection for the user's UID: /masterwork/claimed/allowlist/{uid}
+      allow read, write: if isSignedIn() &&
+        (request.auth.token.email == "mercysquadrant@gmail.com" ||
+         exists(/databases/$(database)/documents/masterwork/claimed/allowlist/$(request.auth.uid)));
+    }
+
+    // Allow the admin (mercysquadrant) to manage the allowlist documents (grant/revoke)
+    match /masterwork/claimed/allowlist/{uid} {
+      // Admin may manage the allowlist documents
+      allow create, update, delete, list: if isSignedIn() && request.auth.token.email == "mercysquadrant@gmail.com";
+      // Admin and the user themselves may read their own allowlist entry
+      allow get: if isSignedIn() && (request.auth.token.email == "mercysquadrant@gmail.com" || request.auth.uid == uid);
+    }
+
     // Default deny
     match /{document=**} {
       allow read, write: if false;
