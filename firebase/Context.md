@@ -42,6 +42,8 @@
 - Per-user link mirrors:
   - Owner link under client: [match /users/{ownerId}/sites/zzq/clients/{clientId}/links/{linkId}](firebase/firestore.rules:114)
   - Client CC link: [match /users/{uid}/sites/cc/links/{linkId}](firebase/firestore.rules:117)
+- Notification tokens:
+  - Per-user device tokens stored under [match /users/{uid}/notificationTokens/{token}](firebase/firestore.rules:121) for FCM push delivery.
 
 ## Rationale
 - Owner-only ZZQ subtree preserves privacy; no cross-user reads.

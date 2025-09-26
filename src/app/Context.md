@@ -44,3 +44,11 @@
 - Home hub permission filter now indexes typed Permissions without casts; see [src/app/page.tsx](src/app/page.tsx).
 - Firestore timestamps use Timestamp; pages avoid any by casting document data to explicit shapes; see [src/app/zzq/page.tsx](src/app/zzq/page.tsx).
 - Auth context timestamps typed as Timestamp; write payloads leverage serverTimestamp() without type assertions; see [src/contexts/AuthContext.tsx](src/contexts/AuthContext.tsx).
+
+## Updates (2025-09-26)
+- ZZQ UI consistency:
+  - Per-project Notes (in Commission) now sort by `createdAt` descending to match the aggregated Notes list.
+  - Projects and Notes cards use equal visual height with internal scrolling and thicker separators for clearer grouping. See [`src/app/zzq/page.tsx`](src/app/zzq/page.tsx).
+- Push Notifications:
+  - Device-level enable/disable from the ZZQ sidebar; stores/deletes FCM token under `/users/{uid}/notificationTokens/{token}` via [`ensurePushPermissionAndToken()`](src/lib/notifications.ts:20) and [`disablePushForThisDevice()`](src/lib/notifications.ts:122).
+  - Per-client notification preference toggle on the Client View header; writes `notificationsEnabled` on the client doc at `/users/{uid}/sites/zzq/clients/{clientId}` (owner-only).

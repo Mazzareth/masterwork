@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { db } from "../../lib/firebase";
 import { collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query } from "firebase/firestore";
 import type { ChatSummary } from "../../lib/linking";
+import { ensurePushPermissionAndToken } from "../../lib/notifications";
 
 export default function CCPage() {
   const { user, permissions, loading, loginWithGoogle } = useAuth();
@@ -15,6 +16,8 @@ export default function CCPage() {
   const [chats, setChats] = useState<ChatSummary[]>([]);
   // Derived: only chats where user is still a participant (filters revoked links)
   const [displayChats, setDisplayChats] = useState<ChatSummary[]>([]);
+  // Commission progress mirror from chat doc
+  const [progressByChat, setProgressByChat] = useState<Record<string, number>>({});
 
   useEffect(() => {
     if (!user) {
@@ -66,30 +69,48 @@ export default function CCPage() {
     return () => unsub();
   }, [user, permissions?.cc, linkCheck]);
 
-  // Validate access to each chatId; hide any chats where user is no longer a participant
-  useEffect(() => {
-    let canceled = false;
-    const validate = async () => {
-      if (!user) {
-        setDisplayChats([]);
-        return;
-      }
-      const arr: ChatSummary[] = [];
-      for (const c of chats) {
-        try {
-          const snap = await getDoc(doc(db, "chats", c.chatId));
-          if (snap.exists()) arr.push(c);
-        } catch {
-          // permission denied or missing chat → filtered out
+    // Validate access to each chatId; hide any chats where user is no longer a participant
+    useEffect(() => {
+      let canceled = false;
+      const validate = async () => {
+        if (!user) {
+          setDisplayChats([]);
+          setProgressByChat({});
+          return;
         }
-      }
-      if (!canceled) setDisplayChats(arr);
-    };
-    validate();
-    return () => {
-      canceled = true;
-    };
-  }, [user, chats]);
+        const arr: ChatSummary[] = [];
+        const prog: Record<string, number> = {};
+        for (const c of chats) {
+          try {
+            const snap = await getDoc(doc(db, "chats", c.chatId));
+            if (snap.exists()) {
+              arr.push(c);
+              const data = snap.data() as { commissionProjects?: Array<{ completion?: number }> } | undefined;
+              const list = data?.commissionProjects || [];
+              if (list.length > 0) {
+                const vals = list
+                  .map((p) => (typeof p.completion === "number" ? p.completion : 0))
+                  .filter((n) => Number.isFinite(n));
+                if (vals.length > 0) {
+                  const avg = Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+                  prog[c.chatId] = avg;
+                }
+              }
+            }
+          } catch {
+            // permission denied or missing chat → filtered out
+          }
+        }
+        if (!canceled) {
+          setDisplayChats(arr);
+          setProgressByChat(prog);
+        }
+      };
+      validate();
+      return () => {
+        canceled = true;
+      };
+    }, [user, chats]);
 
   const isCheckingLinkedAccess =
     !!user && !permissions?.cc && (linkCheck === "idle" || linkCheck === "checking");
@@ -148,6 +169,49 @@ export default function CCPage() {
           </Link>
         </div>
 
+        {/* Notifications / New Messages */}
+        <section className="rounded-lg border border-neutral-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-neutral-200 bg-neutral-50 flex items-center justify-between">
+            <div className="font-medium">Notifications</div>
+            <button
+              onClick={() => { if (user) void ensurePushPermissionAndToken(user.uid); }}
+              className="px-3 py-1.5 rounded-md border border-neutral-300 text-sm hover:bg-neutral-100"
+              title="Enable push notifications"
+            >
+              Enable Push
+            </button>
+          </div>
+          <ul className="divide-y divide-neutral-200">
+            {displayChats.filter((c) => {
+              const lm = c.lastMessageAt?.toMillis?.() ?? 0;
+              const lr = c.lastReadAt?.toMillis?.() ?? 0;
+              return lm > 0 && lm > lr;
+            }).map((c) => (
+              <li key={`notif-${c.chatId}`} className="p-4">
+                <Link href={`/cc/chat/${encodeURIComponent(c.chatId)}`} className="flex items-center justify-between group">
+                  <div>
+                    <div className="font-medium group-hover:underline">{c.clientDisplayName || "Client"}</div>
+                    <div className="text-xs text-neutral-500 mt-0.5">
+                      {c.chatId.slice(0, 8)}… • New messages
+                    </div>
+                  </div>
+                  <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] rounded bg-red-500 text-white">
+                    New
+                  </span>
+                </Link>
+              </li>
+            ))}
+            {displayChats.filter((c) => {
+              const lm = c.lastMessageAt?.toMillis?.() ?? 0;
+              const lr = c.lastReadAt?.toMillis?.() ?? 0;
+              return lm > 0 && lm > lr;
+            }).length === 0 && (
+              <li className="p-6 text-sm text-neutral-500">No new messages.</li>
+            )}
+          </ul>
+        </section>
+
+        {/* Chats */}
         <section className="rounded-lg border border-neutral-200 overflow-hidden">
           <div className="px-4 py-3 border-b border-neutral-200 bg-neutral-50">
             <div className="font-medium">Chats</div>
@@ -162,9 +226,17 @@ export default function CCPage() {
                   >
                     <div>
                       <div className="font-medium group-hover:underline">
-                        {c.clientDisplayName || "Client"}
+                        {c.clientDisplayName || "Client"}{" "}
+                        {(c.lastMessageAt && (!c.lastReadAt || ((c.lastReadAt.toMillis?.() ?? 0) < (c.lastMessageAt.toMillis?.() ?? 0)))) ? (
+                          <span className="ml-2 inline-block px-1.5 py-0.5 text-[10px] rounded bg-red-500 text-white align-middle">New</span>
+                        ) : null}
                       </div>
                       <div className="text-xs text-neutral-500 mt-0.5">
+                        {typeof progressByChat[c.chatId] === "number" ? (
+                          <>
+                            Progress: {progressByChat[c.chatId]}% •{" "}
+                          </>
+                        ) : null}
                         Chat ID: {c.chatId.slice(0, 8)}…
                       </div>
                     </div>

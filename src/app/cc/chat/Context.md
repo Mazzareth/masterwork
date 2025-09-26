@@ -16,6 +16,7 @@
 
 ## Behavior
 - Subscribes to messages ordered by `createdAt`, autoscrolls to latest.
+- Marks messages as read by updating `/users/{uid}/sites/cc/chats/{chatId}.lastReadAt` on snapshot ([page.tsx](src/app/cc/chat/[chatId]/page.tsx:49)).
 - Sending a message writes a document under `/chats/{chatId}/messages` and updates the parent chat’s `lastMessageAt`.
 - No message edit/delete in this phase.
 
@@ -27,3 +28,11 @@
 ## Notes
 - This view assumes that the user reached it via CC dashboard or post-accept redirect and is a chat participant per Firestore rules.
 - Read receipts and unread counters are slated for a later phase.
+
+## New (CC Chat Enhancements)
+- Commission Progress:
+  - Reads a mirrored projects array from the shared chat doc at [src/lib/linking.ts](src/lib/linking.ts) path `/chats/{chatId}.commissionProjects`.
+  - Displays each project's title and a progress bar at the top of the chat view.
+- Update Alerts:
+  - Messages with `kind="update"` are rendered as professional alert cards (amber accent) distinct from regular chat bubbles.
+  - Updates are authored from ZZQ via a dedicated “Send Update” action; clients see them highlighted here.

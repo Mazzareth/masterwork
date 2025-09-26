@@ -62,10 +62,17 @@
 - Firebase App/DB: [src/lib/firebase.ts](src/lib/firebase.ts)
 - Linking utilities: [src/lib/linking.ts](src/lib/linking.ts)
 
-## Notes
+## Notes & UI (2025-09)
 - Internal Projects/Notes are never exposed to CC; only minimal identity and chat flow are shared via invites.
 - Panels use `pointer-events-none` when closed to avoid intercepting clicks; overflow is managed at the page wrapper.
-- Layout padding: ZZQ now uses a safe-area-aware top padding via `--zzq-top-pad` on `.zzq-bg` and a matching viewport height helper `.zzq-viewport` to keep panels full-height without clipping. See [src/app/globals.css](src/app/globals.css) and [ZZQPage()](src/app/zzq/page.tsx:112).
+- Layout padding: ZZQ uses a safe-area-aware top padding via `--zzq-top-pad` on `.zzq-bg` and a matching viewport height helper `.zzq-viewport` to keep panels full-height without clipping. See [src/app/globals.css](src/app/globals.css) and [`ZZQPage()`](src/app/zzq/page.tsx).
+- Ordering consistency: aggregated Notes and per-project Notes now both sort by `createdAt` descending, so the editor input (Commission panel) matches the Notes results list. Change made in [`page.tsx`](src/app/zzq/page.tsx).
+- Side-by-side panels polish:
+  - Projects and Notes sections are equalized visually with a shared max height (≈60vh) and internal scroll, keeping the two cards aligned when placed side-by-side. See the Projects/Notes `<section>` wrappers and the lists’ scroll containers in [`page.tsx`](src/app/zzq/page.tsx).
+  - Thicker list separators improve per-project delineation in both lists (Projects and aggregated Notes).
+- Push Notifications:
+  - Device-level toggle: in the Clients sidebar "Notifications" card, an Enable/Disable button registers or deletes the FCM token for this device. See [`ensurePushPermissionAndToken()`](src/lib/notifications.ts:20), [`disablePushForThisDevice()`](src/lib/notifications.ts:122), and UI wiring in [`page.tsx`](src/app/zzq/page.tsx).
+  - Per-client toggle: in the Client View header, "Notify: On/Off" toggles a client preference stored on the client doc (`/users/{uid}/sites/zzq/clients/{clientId}.notificationsEnabled`). This is owner-only (covered by rules). Server-side senders can respect this flag to silence notifications for specific clients.
 
 ## Type Safety (2025-09)
 - Firestore timestamps typed as Timestamp across Client/Project/Note models.
@@ -92,3 +99,17 @@
   - Commission panel’s per-project Notes editor does not have a right-click menu (can be enabled later).
 - File:
   - [src/app/zzq/page.tsx](src/app/zzq/page.tsx)
+
+## New (Client Communication Enhancements)
+- Send Update:
+  - In the client chat panel, a “Send Update” button sends a highlighted update (`kind="update"`) using [`sendChatUpdate()`](src/lib/linking.ts:304).
+  - Clients see updates as alert cards in CC chat.
+- Commission Progress Mirroring:
+  - Whenever a commission’s title/status/completion changes, ZZQ mirrors a minimal projects array to the shared chat doc (`/chats/{chatId}.commissionProjects`), via `pushCommissionProjection()` in [page.tsx](src/app/zzq/page.tsx:1160).
+  - Clients can read this mirror to view progress on their CC dashboard and within chat.
+- Notifications:
+  - Owner sees a Notifications panel in the Clients sidebar listing chats with unread messages (computed via `lastMessageAt` vs `lastReadAt`) ([page.tsx](src/app/zzq/page.tsx:1439)).
+  - Opening the inline chat marks messages as read by setting `lastReadAt` on the owner's per-user summary ([page.tsx](src/app/zzq/page.tsx:797)).
+  - Push enable button stores FCM tokens under `/users/{uid}/notificationTokens/{token}` via ([ensurePushPermissionAndToken()](src/lib/notifications.ts:23)); background handler in [firebase-messaging-sw.js](public/firebase-messaging-sw.js:1).
+- Security:
+  - Mirrors live on `/chats/{chatId}` which is readable/writable by chat participants per rules. Owner writes; client reads.

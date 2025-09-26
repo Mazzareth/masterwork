@@ -48,6 +48,7 @@ export type ChatSummary = {
   clientDisplayName: string;
   createdAt?: Timestamp;
   lastMessageAt?: Timestamp | null;
+  lastReadAt?: Timestamp | null; // per-user read marker for "New Messages"
 };
 
 export type ClientLink = {
@@ -297,6 +298,35 @@ export async function sendChatMessage(params: {
   await setDoc(
     chatRef,
     { lastMessageAt: serverTimestamp() },
+    { merge: true }
+  );
+}
+
+/**
+ * Send a highlighted "Update" to the chat (participant-only).
+ * Renders as a professional alert on the client side.
+ */
+export async function sendChatUpdate(params: {
+  chatId: string;
+  senderId: string;
+  text: string;
+}): Promise<void> {
+  const { chatId, senderId, text } = params;
+  if (!text.trim()) return;
+  const msgCol = collection(db, "chats", chatId, "messages");
+  await addDoc(msgCol, {
+    senderId,
+    text,
+    kind: "update",
+    createdAt: serverTimestamp(),
+  });
+  const chatRef = doc(db, "chats", chatId);
+  await setDoc(
+    chatRef,
+    {
+      lastMessageAt: serverTimestamp(),
+      lastUpdateAt: serverTimestamp(),
+    },
     { merge: true }
   );
 }

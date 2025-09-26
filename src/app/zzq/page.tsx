@@ -17,6 +17,7 @@ import {
   Timestamp,
   deleteDoc,
   getDocs,
+  setDoc,
   writeBatch,
 } from "firebase/firestore";
 import { where } from "firebase/firestore";
@@ -26,9 +27,11 @@ import {
   revokeInvite,
   unlinkLinkedUser,
   sendChatMessage,
+  sendChatUpdate,
   type InviteDoc,
   type ClientLink,
 } from "../../lib/linking";
+import { ensurePushPermissionAndToken, disablePushForThisDevice, getCurrentFcmTokenIfSupported } from "../../lib/notifications";
 
 type Client = {
   id: string;
@@ -36,6 +39,7 @@ type Client = {
   username?: string | null;
   createdAt?: Timestamp | undefined;
   updatedAt?: Timestamp | undefined;
+  notificationsEnabled?: boolean | undefined;
 };
 
 type Project = {
@@ -182,8 +186,24 @@ export default function ZZQPage() {
   const chatListRef = useRef<HTMLDivElement | null>(null);
 
   // Projects
+
+  // Owner-wide chat summaries (for notifications)
+  type OwnerChatSummary = {
+    chatId: string;
+    userId: string;
+    clientId: string;
+    clientDisplayName: string;
+    lastMessageAt?: Timestamp | null;
+    lastReadAt?: Timestamp | null;
+  };
+  const [ownerChats, setOwnerChats] = useState<OwnerChatSummary[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
+
+  // Push notifications (device-level toggle)
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+
 
   // Project panel: derive open state from selectedProjectId AND projectLive
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -249,6 +269,27 @@ const renameProject = async (p: Project) => {
     p.id
   );
   await updateDoc(ref, { title, updatedAt: serverTimestamp() });
+  await pushCommissionProjection();
+};
+
+const toggleNotificationsForSelectedClient = async () => {
+  if (!user || !selected) return;
+  const next = !Boolean(selected.notificationsEnabled);
+  // Optimistic UI
+  setSelected((prev) => (prev ? { ...prev, notificationsEnabled: next } : prev));
+  setClients((prev) =>
+    prev.map((it) => (it.id === selected.id ? { ...it, notificationsEnabled: next } : it))
+  );
+  const ref = doc(
+    db,
+    "users",
+    user.uid,
+    "sites",
+    "zzq",
+    "clients",
+    selected.id
+  );
+  await updateDoc(ref, { notificationsEnabled: next, updatedAt: serverTimestamp() });
 };
 
 const editNoteViaPrompt = async (projectId: string, noteId: string, currentText: string) => {
@@ -525,6 +566,7 @@ const requestDeleteProject = async (p: Project) => {
 
   try {
     await deleteProjectCascade(p.id);
+    await pushCommissionProjection();
   } finally {
     // no-op; live listeners will reconcile if needed
   }
@@ -713,6 +755,32 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
     return () => unsub();
   }, [user, selected]);
 
+  // Subscribe to owner's per-user chat summaries for notifications panel
+  useEffect(() => {
+    if (!user) {
+      setOwnerChats([]);
+      return;
+    }
+    const col = collection(db, "users", user.uid, "sites", "cc", "chats");
+    const qy = query(col, orderBy("lastMessageAt", "desc"));
+    const unsub = onSnapshot(qy, (snap) => {
+      const arr: OwnerChatSummary[] = [];
+      snap.forEach((d) => {
+        const data = d.data() as Partial<OwnerChatSummary> & { clientDisplayName?: string; clientId?: string; userId?: string };
+        arr.push({
+          chatId: d.id,
+          userId: data.userId ?? "",
+          clientId: data.clientId ?? "",
+          clientDisplayName: data.clientDisplayName ?? "Client",
+          lastMessageAt: data.lastMessageAt ?? null,
+          lastReadAt: data.lastReadAt ?? null,
+        });
+      });
+      setOwnerChats(arr);
+    });
+    return () => unsub();
+  }, [user]);
+
   // Live list of linked users for the selected client
   useEffect(() => {
     if (!user || !selected) {
@@ -766,6 +834,16 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
         const el = chatListRef.current;
         if (el) el.scrollTop = el.scrollHeight;
       }, 0);
+      // Mark messages as read for the owner on this chat
+      if (user && selectedChatId) {
+        void setDoc(
+          doc(db, "users", user.uid, "sites", "cc", "chats", selectedChatId),
+          { lastReadAt: serverTimestamp() },
+          { merge: true }
+        ).catch(() => {
+          // ignore
+        });
+      }
     });
     return () => unsub();
   }, [user, selectedChatId]);
@@ -844,7 +922,7 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
         p.id,
         "notes"
       );
-      const unsub = onSnapshot(query(colRef, orderBy("createdAt")), (snap) => {
+      const unsub = onSnapshot(query(colRef, orderBy("createdAt", "desc")), (snap) => {
         const arr: Note[] = [];
         snap.forEach((d) => {
           const data = d.data() as NoteDoc;
@@ -1071,6 +1149,7 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
+    await pushCommissionProjection();
     // Open commission panel for the new project and flash the list row
     setSelectedProjectId(docRef.id);
     setProjectComposeOpen(false);
@@ -1155,13 +1234,13 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
 
   const updateProject = async (patch: Partial<Project>) => {
     if (!user || !selected || !selectedProjectId) return;
-
+  
     // Optimistic update
     setProjectLive((prev) => (prev ? { ...prev, ...patch } : prev));
     setProjects((prev) =>
       prev.map((it) => (it.id === selectedProjectId ? { ...it, ...patch } : it))
     );
-
+  
     const ref = doc(
       db,
       "users",
@@ -1174,6 +1253,38 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
       selectedProjectId
     );
     await updateDoc(ref, { ...patch, updatedAt: serverTimestamp() });
+    await pushCommissionProjection();
+  };
+  
+  /**
+   * Mirror current projects to the shared chat doc(s) for linked users so clients can see progress.
+   */
+  const pushCommissionProjection = async () => {
+    if (!user || !selected) return;
+    // Build a minimal projection array
+    const projection = projects.map((p) => ({
+      id: p.id,
+      title: p.title,
+      status: p.status,
+      completion: p.completion,
+      updatedAt: serverTimestamp(),
+    }));
+    // Write to each chat for this client (one per linked user)
+    for (const lnk of linksForClient) {
+      try {
+        const chatRef = doc(db, "chats", lnk.linkId);
+        await setDoc(
+          chatRef,
+          {
+            commissionProjects: projection,
+            lastUpdateAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      } catch {
+        // best-effort mirror
+      }
+    }
   };
 
   const updateProjectNoteText = async (
@@ -1211,7 +1322,7 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
     if (!user || !selected) return;
     const newStatus = p.status === "completed" ? "pending" : "completed";
     const newCompletion = newStatus === "completed" ? 100 : 0;
-
+  
     // Optimistic updates
     setProjects((prev) =>
       prev.map((it) =>
@@ -1225,7 +1336,7 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
         ? { ...prev, status: newStatus, completion: newCompletion }
         : prev
     );
-
+  
     const ref = doc(
       db,
       "users",
@@ -1242,6 +1353,7 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
       completion: newCompletion,
       updatedAt: serverTimestamp(),
     });
+    await pushCommissionProjection();
   };
 
 
@@ -1267,6 +1379,15 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
       updatedAt: serverTimestamp(),
     });
   };
+
+  // Push notifications: initialize device state
+  useEffect(() => {
+    (async () => {
+      const t = await getCurrentFcmTokenIfSupported();
+      setPushEnabled(Boolean(t));
+    })();
+  }, []);
+
 
   // Gates
   if (loading) {
@@ -1409,6 +1530,75 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
                 </div>
               </div>
             )}
+            
+            {/* Notifications / New Messages */}
+            <div className="mt-3 rounded-lg border border-cyan-500/40 bg-white/[0.03] p-3">
+              <div className="flex items-center justify-between">
+                <div className="font-medium">Notifications</div>
+                <button
+                  onClick={async () => {
+                    if (!user || pushBusy) return;
+                    setPushBusy(true);
+                    try {
+                      if (pushEnabled) {
+                        await disablePushForThisDevice(user.uid);
+                        setPushEnabled(false);
+                      } else {
+                        const t = await ensurePushPermissionAndToken(user.uid);
+                        setPushEnabled(Boolean(t));
+                      }
+                    } finally {
+                      setPushBusy(false);
+                    }
+                  }}
+                  className={cx(
+                    "px-2 py-1 rounded-md border text-xs transition",
+                    pushEnabled
+                      ? "border-rose-400/40 text-rose-200 hover:bg-white/[0.06]"
+                      : "border-white/10 text-slate-200 hover:bg-white/[0.06]"
+                  )}
+                  disabled={pushBusy}
+                  title={pushEnabled ? "Disable push notifications on this device" : "Enable push notifications on this device"}
+                >
+                  {pushEnabled ? (pushBusy ? "Disabling…" : "Disable Push") : (pushBusy ? "Enabling…" : "Enable Push")}
+                </button>
+              </div>
+              <ul className="mt-2 space-y-2">
+                {ownerChats.filter((c) => {
+                  const lm = c.lastMessageAt?.toMillis?.() ?? 0;
+                  const lr = c.lastReadAt?.toMillis?.() ?? 0;
+                  return lm > 0 && lm > lr;
+                }).slice(0, 5).map((c) => (
+                  <li key={`owner-notif-${c.chatId}`} className="flex items-center justify-between text-sm">
+                    <div className="truncate">
+                      <span className="font-medium">{c.clientDisplayName}</span>
+                      <span className="ml-2 inline-block px-1.5 py-0.5 text-[10px] rounded bg-red-500 text-white align-middle">New</span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        const tgt = clients.find((cl) => cl.id === c.clientId);
+                        if (tgt) {
+                          setSelected(tgt);
+                          setPaneOpen(true);
+                          setLinkPanelOpen(true);
+                          setSelectedProjectId(null);
+                        }
+                      }}
+                      className="ml-2 px-2 py-1 rounded-md border border-white/10 hover:bg-white/[0.06] text-xs"
+                    >
+                      Open
+                    </button>
+                  </li>
+                ))}
+                {ownerChats.filter((c) => {
+                  const lm = c.lastMessageAt?.toMillis?.() ?? 0;
+                  const lr = c.lastReadAt?.toMillis?.() ?? 0;
+                  return lm > 0 && lm > lr;
+                }).length === 0 && (
+                  <li className="text-sm text-slate-500">No new messages.</li>
+                )}
+              </ul>
+            </div>
           </div>
 
           <div className="overflow-y-auto h-[calc(100vh-98px)] p-2 space-y-2">
@@ -1595,6 +1785,18 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
                       title={linkPanelOpen ? "Hide linking tools" : "Link client to CC"}
                     >
                       {linkPanelOpen ? "Hide Link" : "Link Client"}
+                    </button>
+                    <button
+                      onClick={() => { void toggleNotificationsForSelectedClient(); }}
+                      className={cx(
+                        "px-3 py-1.5 rounded-md border text-xs md:text-sm transition",
+                        selected?.notificationsEnabled
+                          ? "border-cyan-500/40 text-cyan-200 hover:bg-white/[0.06]"
+                          : "border-white/10 text-slate-200 hover:bg-white/[0.06]"
+                      )}
+                      title="Toggle push notifications for this client"
+                    >
+                      {selected?.notificationsEnabled ? "Notify: On" : "Notify: Off"}
                     </button>
                     <button
                       ref={clientCloseRef}
@@ -1817,14 +2019,37 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
                                 placeholder="Type a message…"
                                 className="flex-1 rounded-md border border-white/10 bg-white/[0.05] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-cyan-400/60 placeholder:text-slate-500"
                               />
-                              <button
-                                disabled={!chatText.trim() || chatBusy}
-                                className="px-3 py-2 rounded-md bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white text-xs hover:opacity-95 disabled:opacity-60"
-                                type="submit"
-                                title="Send"
-                              >
-                                Send
-                              </button>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  disabled={!chatText.trim() || chatBusy}
+                                  className="px-3 py-2 rounded-md bg-gradient-to-r from-cyan-500 to-fuchsia-500 text-white text-xs hover:opacity-95 disabled:opacity-60"
+                                  type="submit"
+                                  title="Send"
+                                >
+                                  Send
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={!chatText.trim() || chatBusy}
+                                  onClick={() => {
+                                    if (!user || !selectedChatId || !chatText.trim()) return;
+                                    (async () => {
+                                      try {
+                                        setChatBusy(true);
+                                        const t = chatText;
+                                        setChatText("");
+                                        await sendChatUpdate({ chatId: selectedChatId, senderId: user.uid, text: t });
+                                      } finally {
+                                        setChatBusy(false);
+                                      }
+                                    })();
+                                  }}
+                                  className="px-3 py-2 rounded-md border border-cyan-400/40 text-cyan-200 hover:bg-white/[0.06] text-xs disabled:opacity-60"
+                                  title="Send Update (alert)"
+                                >
+                                  Send Update
+                                </button>
+                              </div>
                             </form>
                           </div>
                         </div>
@@ -1833,7 +2058,7 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
                   )}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {/* Projects */}
-                    <section className="rounded-lg border border-white/10 bg-white/[0.03]">
+                    <section className="rounded-lg border border-white/10 bg-white/[0.03] h-full max-h-[60vh] flex flex-col">
                       <div className="p-3 border-b border-white/10 flex items-center justify-between bg-white/[0.02]">
                         <h3 className="font-medium">Projects</h3>
                         <button
@@ -1884,7 +2109,7 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
                           </div>
                         </div>
                       )}
-                      <ul className="divide-y divide-white/10">
+                      <ul className="divide-y-2 divide-white/20 flex-1 min-h-0 overflow-y-auto">
                         {projectsLoading && projects.length === 0 ? (
                           <>
                             {Array.from({ length: 3 }).map((_, i) => (
@@ -1945,7 +2170,7 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
                     </section>
 
                     {/* Notes (aggregated, navigates to project notes for editing) */}
-                    <section className="rounded-lg border border-white/10 bg-white/[0.03]">
+                    <section className="rounded-lg border border-white/10 bg-white/[0.03] h-full max-h-[60vh] flex flex-col">
                       <div className="p-3 border-b border-white/10 flex items-center justify-between bg-white/[0.02]">
                         <h3 className="font-medium">Notes</h3>
                         <button
@@ -2026,7 +2251,7 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
                           </div>
                         </div>
                       )}
-                      <ul className="divide-y divide-white/10">
+                      <ul className="divide-y-2 divide-white/20 flex-1 min-h-0 overflow-y-auto">
                         {projectsLoading && aggregatedNotes.length === 0 ? (
                           <>
                             {Array.from({ length: 4 }).map((_, i) => (

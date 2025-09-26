@@ -5,13 +5,14 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useAuth } from "../../../../contexts/AuthContext";
 import { db } from "../../../../lib/firebase";
-import { collection, onSnapshot, orderBy, query, Timestamp } from "firebase/firestore";
+import { collection, onSnapshot, orderBy, query, Timestamp, doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { sendChatMessage } from "../../../../lib/linking";
 
 type Msg = {
   id: string;
   senderId: string;
   text: string;
+  kind?: "message" | "update";
   createdAt?: Timestamp;
 };
 
@@ -24,6 +25,26 @@ export default function CCChatPage() {
   const [busy, setBusy] = useState(false);
   const [text, setText] = useState("");
   const listRef = useRef<HTMLDivElement | null>(null);
+
+  // Commission progress mirror from chat doc
+  const [commissionProjects, setCommissionProjects] = useState<
+    Array<{ id: string; title?: string; status?: string; completion?: number }>
+  >([]);
+
+  // Subscribe to commission mirror on chat doc
+  useEffect(() => {
+    if (!user || !chatId) return;
+    const ref = doc(db, "chats", chatId);
+    const unsub = onSnapshot(ref, (snap) => {
+      if (!snap.exists()) {
+        setCommissionProjects([]);
+        return;
+      }
+      const data = snap.data() as { commissionProjects?: Array<{ id: string; title?: string; status?: string; completion?: number }> };
+      setCommissionProjects(Array.isArray(data.commissionProjects) ? data.commissionProjects : []);
+    });
+    return () => unsub();
+  }, [user, chatId]);
 
   // Subscribe to messages
   useEffect(() => {
@@ -42,6 +63,16 @@ export default function CCChatPage() {
         const el = listRef.current;
         if (el) el.scrollTop = el.scrollHeight;
       }, 0);
+      // Mark messages as read for this user (updates per-user chat summary)
+      if (user) {
+        void setDoc(
+          doc(db, "users", user.uid, "sites", "cc", "chats", chatId),
+          { lastReadAt: serverTimestamp() },
+          { merge: true }
+        ).catch(() => {
+          // ignore permission/latency errors; will retry on next snapshot
+        });
+      }
     });
     return () => unsub();
   }, [user, chatId]);
@@ -96,12 +127,49 @@ export default function CCChatPage() {
           </Link>
         </div>
 
+        {/* Commission Progress */}
+        {commissionProjects.length > 0 && (
+          <div className="px-3 py-2 border-b border-neutral-200 bg-neutral-50">
+            <div className="text-xs font-medium text-neutral-700 mb-2">Commission Progress</div>
+            <ul className="space-y-2">
+              {commissionProjects.map((p) => (
+                <li key={p.id}>
+                  <div className="flex items-center justify-between text-xs text-neutral-600 mb-1">
+                    <span className="font-medium">{p.title ?? "Project"}</span>
+                    <span>{typeof p.completion === "number" ? `${Math.round(p.completion)}%` : "0%"}</span>
+                  </div>
+                  <div className="h-2 rounded bg-neutral-200 overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-cyan-500 to-fuchsia-500"
+                      style={{ width: `${Math.round(p.completion ?? 0)}%` }}
+                    />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         <div ref={listRef} className="flex-1 overflow-y-auto p-3 space-y-3 bg-white">
           {messages.map((m) => {
             const mine = m.senderId === user.uid;
             const t = m.createdAt?.toDate();
             const time = t ? t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
-            return (
+            const isUpdate = m.kind === "update";
+            return isUpdate ? (
+              <div
+                key={m.id}
+                className="mr-auto max-w-[90%] rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 shadow"
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide rounded bg-amber-200 text-amber-900">
+                    Update
+                  </span>
+                  <span className="text-[11px] text-amber-800">{time}</span>
+                </div>
+                <div>{m.text || "(empty update)"}</div>
+              </div>
+            ) : (
               <div
                 key={m.id}
                 className={`max-w-[80%] rounded-lg px-3 py-2 text-sm shadow ${

@@ -118,6 +118,11 @@ service cloud.firestore {
       allow read, write, list, delete: if isOwner(uid);
     }
 
+    // Notification tokens (per-user device tokens for FCM)
+    match /users/{uid}/notificationTokens/{token} {
+      allow read, write, list, delete: if isOwner(uid);
+    }
+
     // Legacy explicit ZZQ matches (redundant with the zzq/** rule above, kept for clarity)
     match /users/{uid}/sites/zzq/clients/{clientId} {
       allow read, create, update, delete: if isOwner(uid);
