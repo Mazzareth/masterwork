@@ -13,7 +13,7 @@ import {
   where,
 } from "firebase/firestore";
 
-import { deterministicChatId } from "./linking";
+import { deterministicChatId, ensureOwnerMirrorsForLink } from "./linking";
 
 export type CommissionSlugDoc = {
   ownerId: string;
@@ -187,4 +187,63 @@ export async function openOrEnsureCommissionChat(params: {
   }
 
   return { chatId, clientId };
+}
+
+export async function ensureOwnerCommissionClient(params: {
+  ownerId: string;
+  userId: string;
+  clientId?: string;
+  clientDisplayName?: string | null;
+}): Promise<{ clientId: string; chatId: string }> {
+  const ownerId = params.ownerId;
+  const userId = params.userId;
+  const clientId = (params.clientId ?? `u:${userId}`).trim();
+  const displayName = (params.clientDisplayName || "").trim() || "Client";
+
+  const clientRef = doc(db, "users", ownerId, "sites", "zzq", "clients", clientId);
+
+  try {
+    const snap = await getDoc(clientRef);
+    if (!snap.exists()) {
+      await setDoc(
+        clientRef,
+        {
+          displayName,
+          username: null,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+    } else {
+      const data = snap.data() as Partial<{ displayName?: string }>;
+      const patch: Record<string, unknown> = {};
+      if (!data.displayName) {
+        patch.displayName = displayName;
+      }
+      if (Object.keys(patch).length > 0) {
+        patch.updatedAt = serverTimestamp();
+        await setDoc(clientRef, patch, { merge: true });
+      }
+    }
+  } catch (err) {
+    console.error("[commission] ensureOwnerCommissionClient: failed to ensure client doc", err);
+    throw err;
+  }
+
+  const chatId = deterministicChatId(ownerId, clientId, userId);
+
+  try {
+    await ensureOwnerMirrorsForLink({
+      ownerId,
+      clientId,
+      clientDisplayName: displayName,
+      userId,
+    });
+  } catch (err) {
+    console.error("[commission] ensureOwnerCommissionClient: failed to ensure owner mirrors", err);
+    throw err;
+  }
+
+  return { clientId, chatId };
 }

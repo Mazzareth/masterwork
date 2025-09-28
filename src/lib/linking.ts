@@ -300,6 +300,44 @@ export async function sendChatMessage(params: {
     { lastMessageAt: serverTimestamp() },
     { merge: true }
   );
+
+  // Also mirror lastMessageAt onto per-user chat summaries so UIs can compute "unread"
+  try {
+    const snap = await getDoc(chatRef);
+    if (snap.exists()) {
+      const data = snap.data() as { ownerId?: string; userId?: string };
+      const ownerId = data.ownerId;
+      const clientUserId = data.userId;
+
+      // Owner's per-user summary (participants are allowed to update owner's summary by rules)
+      if (ownerId) {
+        try {
+          await setDoc(
+            doc(db, "users", ownerId, "sites", "cc", "chats", chatId),
+            { chatId, ownerId, ...(clientUserId ? { userId: clientUserId } : {}), lastMessageAt: serverTimestamp() },
+            { merge: true }
+          );
+        } catch {
+          // ignore — owner summary mirror is best-effort
+        }
+      }
+
+      // Client/self per-user summary (self-owned path)
+      if (clientUserId) {
+        try {
+          await setDoc(
+            doc(db, "users", clientUserId, "sites", "cc", "chats", chatId),
+            { lastMessageAt: serverTimestamp() },
+            { merge: true }
+          );
+        } catch {
+          // ignore — client summary mirror is best-effort
+        }
+      }
+    }
+  } catch {
+    // ignore mirror failures
+  }
 }
 
 /**
@@ -329,6 +367,37 @@ export async function sendChatUpdate(params: {
     },
     { merge: true }
   );
+
+  // Mirror lastMessageAt to per-user chat summaries (owner + client)
+  try {
+    const snap = await getDoc(chatRef);
+    if (snap.exists()) {
+      const data = snap.data() as { ownerId?: string; userId?: string };
+      const ownerId = data.ownerId;
+      const clientUserId = data.userId;
+
+      if (ownerId) {
+        try {
+          await setDoc(
+            doc(db, "users", ownerId, "sites", "cc", "chats", chatId),
+            { chatId, ownerId, ...(clientUserId ? { userId: clientUserId } : {}), lastMessageAt: serverTimestamp() },
+            { merge: true }
+          );
+        } catch {}
+      }
+      if (clientUserId) {
+        try {
+          await setDoc(
+            doc(db, "users", clientUserId, "sites", "cc", "chats", chatId),
+            { lastMessageAt: serverTimestamp() },
+            { merge: true }
+          );
+        } catch {}
+      }
+    }
+  } catch {
+    // ignore mirror failures
+  }
 }
 
 /**
@@ -364,36 +433,20 @@ export async function ensureOwnerMirrorsForLink(params: {
   const { ownerId, clientId, clientDisplayName, userId } = params;
   const clientRef = params.clientRef ?? `/users/${ownerId}/sites/zzq/clients/${clientId}`;
 
-  // Ensure canonical chat exists
+  // Ensure canonical chat exists without preliminary GET (avoid rules denial on non-existent doc)
   const chatId = deterministicChatId(ownerId, clientId, userId);
   const chatRef = doc(db, "chats", chatId);
-  const chatSnap = await getDoc(chatRef);
-  if (!chatSnap.exists()) {
-    await setDoc(chatRef, {
+  await setDoc(
+    chatRef,
+    {
       ownerId,
       userId,
       clientId,
       clientRef,
       participants: [ownerId, userId],
-      createdAt: serverTimestamp(),
-      lastMessageAt: null,
-    } as ChatDoc);
-  } else {
-    const data = chatSnap.data() as Partial<ChatDoc>;
-    const participants = Array.from(new Set([...(data.participants || []), ownerId, userId]));
-    await setDoc(
-      chatRef,
-      {
-        ownerId,
-        userId,
-        clientId,
-        clientRef,
-        participants,
-        createdAt: data.createdAt || serverTimestamp(),
-      },
-      { merge: true }
-    );
-  }
+    } as Partial<ChatDoc>,
+    { merge: true }
+  );
 
   // Owner's per-user chat summary
   const ownerChatRef = doc(db, "users", ownerId, "sites", "cc", "chats", chatId);

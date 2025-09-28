@@ -7,7 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { db } from "@/lib/firebase";
 import { doc, getDoc } from "firebase/firestore";
 import { openOrEnsureCommissionChat } from "@/lib/commission";
-import { sendChatMessage } from "@/lib/linking";
+import { sendChatMessage, sendChatUpdate } from "@/lib/linking";
 
 type State =
   | { phase: "loading" }
@@ -69,12 +69,19 @@ export default function CommissionPage() {
         slug,
       });
       const text = message.trim();
-      if (text) {
-        try {
+      try {
+        if (text) {
           await sendChatMessage({ chatId: res.chatId, senderId: user.uid, text });
-        } catch {
-          // ignore send error; chat is created
+        } else {
+          // Ensure a visible request by posting a system update when no message is provided
+          await sendChatUpdate({
+            chatId: res.chatId,
+            senderId: user.uid,
+            text: "Started a commission request",
+          });
         }
+      } catch {
+        // best-effort; chat exists regardless
       }
       router.replace(`/cc/chat/${res.chatId}`);
     } catch {

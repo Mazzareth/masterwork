@@ -45,3 +45,9 @@
 - Local files:
   - [src/contexts/AuthContext.tsx](src/contexts/AuthContext.tsx)
   - [src/config/pages.ts](src/config/pages.ts)
+## Updates (2025-09-27)
+- Fix: Eliminated a Firestore “Missing or insufficient permissions” error that occurred when a non-owner chat participant mirrored lastMessageAt onto the owner’s per-user summary. Updated [sendChatMessage()](src/lib/linking.ts:283) and [sendChatUpdate()](src/lib/linking.ts:347) to include the required identifiers when writing to `/users/{ownerId}/sites/cc/chats/{chatId}`:
+  - Payload now includes `chatId`, `ownerId`, and the participant’s `userId` (when available), alongside `lastMessageAt`.
+  - This satisfies the rule constraints in [firebase/firestore.rules](firebase/firestore.rules:131) for participant-created/updated owner summaries.
+- Correction: The stable chat id helper is [deterministicChatId()](src/lib/linking.ts:97) (previous docs referenced an older name).
+- Validation: From a non-owner account, use `/commission/{slug}` and submit a request. The owner should now see a “New” entry in ZZQ → Notifications without any permission errors.

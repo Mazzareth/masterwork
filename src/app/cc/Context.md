@@ -27,6 +27,7 @@ Implemented in [CCPage()](src/app/cc/page.tsx:11).
 - Styling is Tailwind-only; no component lib dependency.
 - Buttons/inputs observe accessible contrast in dark mode.
 - Push enable stores FCM tokens under `/users/{uid}/notificationTokens/{token}` via [ensurePushPermissionAndToken()](src/lib/notifications.ts:23).
+- Notifications depend on Firestore 'list' permission for `/users/{ownerId}/sites/cc/chats`; if denied, ZZQ surfaces a warning and logs a pointer to the rules.
 
 Did I explain the functionality clearly in Context.md? Yes.
 Would another engineer understand the purpose within 2 minutes? Yes.

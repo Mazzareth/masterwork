@@ -1,63 +1,38 @@
 # Context
 
 ## Overview
-- Firestore rules secure per-user data while enabling cross-tenant invites and chats.
-- Owner's ZZQ data remains private under their `/users/{uid}/sites/zzq/**` subtree.
-- Linked Clients use top-level canonical chats plus per-user mirrors for secure listing.
+- Firestore security rules live at [`firebase/firestore.rules`](firebase/firestore.rules:1).
+- Rules protect per-user data (ZZQ), canonical chats, invites, commission slugs, and other site-specific subtrees.
 
-## Files
-- [firebase/firestore.rules](firebase/firestore.rules:1)
+## Recent changes (2025-09-26)
+- Introduced a lightweight admin helper `isAdmin()` that checks the authenticated user's email (currently "mercysquadrant@gmail.com").
+- Relaxed `/users/{uid}` rules to allow owner or admin to create/get/list/update user documents to support Auth provider bootstrap and admin lookup by email.
+- Added an invite-only area for Masterwork Claimed:
+  - Tasks: `masterwork/claimed/tasks/{taskId}`
+  - Allowlist: `masterwork/claimed/allowlist/{uid}`
+  - Access is granted if the user is admin or has an allowlist document keyed by their uid.
+- Note: admin check currently uses an email claim — consider migrating to an admin UID or role stored on `/users/{uid}` for greater robustness.
 
-## What’s enforced (key sections)
-- Users can read/write only their own user doc:
-  - [match /users/{uid}](firebase/firestore.rules:33)
-- Owner-only ZZQ subtree:
-  - [match /users/{uid}/sites/zzq/{document=**}](firebase/firestore.rules:41)
-- Invites under owner subtree:
-  - [match /users/{ownerId}/sites/zzq/invites/{token}](firebase/firestore.rules:49)
-  - Any signed-in user may GET a specific invite if status="active" and not expired:
-    - [allow get](firebase/firestore.rules:51)
-  - Owner-only list/create/revoke:
-    - [allow list](firebase/firestore.rules:55)
-    - [allow create](firebase/firestore.rules:58)
-    - [allow update] for owner revoke or accepting user setting status="used" with usedBy=uid:
-      - (owner) [allow update](firebase/firestore.rules:64)
-      - (acceptor) [allow update](firebase/firestore.rules:68)
-    - [allow delete](firebase/firestore.rules:76)
-- Canonical chats (cross-tenant):
-  - [match /chats/{chatId}](firebase/firestore.rules:81)
-  - Create if caller is in `request.resource.data.participants`:
-    - [allow create](firebase/firestore.rules:83)
-  - Read/Update if caller is in `resource.data.participants`:
-    - [allow get, update](firebase/firestore.rules:86)
-  - Disallow global list/delete:
-    - [allow list: if false](firebase/firestore.rules:91)
-    - [allow delete: if false](firebase/firestore.rules:92)
-  - Messages derive permission from parent chat participants:
-    - [match /chats/{chatId}/messages/{messageId}](firebase/firestore.rules:95)
-    - [allow read, create](firebase/firestore.rules:96)
-- Per-user CC mirrors for secure listing:
-  - Owner’s CC chats mirror: [match /users/{ownerId}/sites/cc/chats/{chatId}](firebase/firestore.rules:104)
-  - Client’s CC chats mirror: [match /users/{uid}/sites/cc/chats/{chatId}](firebase/firestore.rules:108)
-- Per-user link mirrors:
-  - Owner link under client: [match /users/{ownerId}/sites/zzq/clients/{clientId}/links/{linkId}](firebase/firestore.rules:114)
-  - Client CC link: [match /users/{uid}/sites/cc/links/{linkId}](firebase/firestore.rules:117)
-- Notification tokens:
-  - Per-user device tokens stored under [match /users/{uid}/notificationTokens/{token}](firebase/firestore.rules:121) for FCM push delivery.
+## Updates (2025-09-27)
+- Adjusted owner chat summary rules to unblock ZZQ notifications:
+  - In [firebase/firestore.rules](firebase/firestore.rules:131), `allow create, update` for `/users/{ownerId}/sites/cc/chats/{chatId}` now checks that the writer is a participant and that any provided `userId` corresponds to an allowed participant (either themselves or the linked client), removing the previous strict `userId == request.auth.uid` requirement.
+  - This resolves “Missing or insufficient permissions” errors triggered when linked clients mirror `lastMessageAt` into the owner’s summary while still ensuring only participants can update the document.
+- Paired with the client-side patch in [sendChatMessage()](src/lib/linking.ts:283) and [sendChatUpdate()](src/lib/linking.ts:347) to include the required identifiers in the write payload.
+## Debugging "Missing or insufficient permissions"
+- Common causes:
+  - The client attempted a Firestore read/write before auth was available. AuthProvider uses `onAuthStateChanged`; ensure your client waits for `user` before making Firestore calls.
+  - Admin email mismatch: rules use `request.auth.token.email == "mercysquadrant@gmail.com"`. Confirm the signed-in user is using that Google account.
+  - Query/list operations require explicit `list` permission on the target collection (for example, the admin must be signed-in to query `/users` by email).
+- Quick checks:
+  - Sign in as the admin account once (so `/users/{uid}` exists) before using the admin UI to grant others.
+  - If you prefer, I can change the admin check to a specific UID or a role field on `/users/{uid}`.
 
-## Rationale
-- Owner-only ZZQ subtree preserves privacy; no cross-user reads.
-- Invitations live under the owner's path for owner listing; invitees can only GET by token when active.
-- Canonical chat doc ensures participant-based access control; per-user mirrors allow listing without exposing data broadly.
-- Disallowing LIST on `/chats` prevents enumeration while mirrors under `/users/{uid}/sites/cc/chats` provide user-specific lists.
+## Files referenced
+- [`firebase/firestore.rules`](firebase/firestore.rules:1)
+- [`src/contexts/AuthContext.tsx`](src/contexts/AuthContext.tsx:1)
+- [`src/app/zzq/page.tsx`](src/app/zzq/page.tsx:1)
+- [`src/app/masterwork/claimed/page.tsx`](src/app/masterwork/claimed/page.tsx:1)
 
-## Operational notes
-- Deploy rules via Console or CLI to activate changes:
-  - Firebase CLI: `firebase deploy --only firestore:rules`
-- Rules propagation can take 30–60 seconds.
-- Indexes: Firestore may prompt for single-field indexes when ordering by `lastMessageAt` (chats mirrors) or `createdAt` (messages). Accept prompts.
-
-## References
-- Canonical chat creation path used by [acceptInvite()](src/lib/linking.ts:179)
-- Invite GET/update used by [CCLinkAcceptPage()](src/app/cc/link/page.tsx:1)
-- Mirrors for CC dashboard reading in [CCPage()](src/app/cc/page.tsx:1)
+## Next steps
+- If the permission error persists, paste the console error including the Firestore document path or confirm which account (email/uid) you're signed in as so I can further adjust rules safely.
+- Recommended: migrate admin check to UID or role claim to avoid brittle email-based checks.

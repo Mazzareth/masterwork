@@ -33,7 +33,7 @@ import {
   type ClientLink,
 } from "../../lib/linking";
 import { ensurePushPermissionAndToken, disablePushForThisDevice, getCurrentFcmTokenIfSupported } from "../../lib/notifications";
-import { reserveCommissionSlug } from "@/lib/commission";
+import { reserveCommissionSlug, ensureOwnerCommissionClient } from "@/lib/commission";
 
 type Client = {
   id: string;
@@ -117,6 +117,7 @@ function StatusBadge({ status }: { status: Project["status"] }) {
 
 export default function ZZQPage() {
   const { user, permissions, loading, loginWithGoogle } = useAuth();
+  const ownerUid = user?.uid ?? null;
   // Unified ghost button style for Client header actions
   const headerBtnBase =
     "px-3 py-1.5 rounded-md border text-xs md:text-sm transition hover:bg-white/[0.06] active:scale-[.98] focus-visible:ring-2 focus-visible:ring-cyan-400/60";
@@ -190,6 +191,7 @@ export default function ZZQPage() {
   const [chatText, setChatText] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
   const chatListRef = useRef<HTMLDivElement | null>(null);
+  const ensuredCommissionClientsRef = useRef<Set<string>>(new Set());
 
   // AI: ZZQ (DeepSeek) slide-up chat state
   type AIMessage = { role: "system" | "user" | "assistant" | string; content: string };
@@ -294,6 +296,7 @@ export default function ZZQPage() {
     lastReadAt?: Timestamp | null;
   };
   const [ownerChats, setOwnerChats] = useState<OwnerChatSummary[]>([]);
+  const [notifError, setNotifError] = useState<string | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
 
@@ -876,27 +879,72 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
   useEffect(() => {
     if (!user) {
       setOwnerChats([]);
+      setNotifError(null);
       return;
     }
     const col = collection(db, "users", user.uid, "sites", "cc", "chats");
     const qy = query(col, orderBy("lastMessageAt", "desc"));
-    const unsub = onSnapshot(qy, (snap) => {
-      const arr: OwnerChatSummary[] = [];
-      snap.forEach((d) => {
-        const data = d.data() as Partial<OwnerChatSummary> & { clientDisplayName?: string; clientId?: string; userId?: string };
-        arr.push({
-          chatId: d.id,
-          userId: data.userId ?? "",
-          clientId: data.clientId ?? "",
-          clientDisplayName: data.clientDisplayName ?? "Client",
-          lastMessageAt: data.lastMessageAt ?? null,
-          lastReadAt: data.lastReadAt ?? null,
+    const unsub = onSnapshot(
+      qy,
+      (snap) => {
+        const arr: OwnerChatSummary[] = [];
+        snap.forEach((d) => {
+          const data = d.data() as Partial<OwnerChatSummary> & { clientDisplayName?: string; clientId?: string; userId?: string };
+          arr.push({
+            chatId: d.id,
+            userId: data.userId ?? "",
+            clientId: data.clientId ?? "",
+            clientDisplayName: data.clientDisplayName ?? "Client",
+            lastMessageAt: data.lastMessageAt ?? null,
+            lastReadAt: data.lastReadAt ?? null,
+          });
         });
-      });
-      setOwnerChats(arr);
-    });
+        setOwnerChats(arr);
+        setNotifError(null);
+      },
+      (err) => {
+        // Likely Firestore rules missing 'list' on /users/{ownerId}/sites/cc/chats
+        console.error(
+          "ZZQ notifications subscription error (owner cc chats). Check Firestore rules for 'list' on /users/{uid}/sites/cc/chats:",
+          err
+        );
+        setOwnerChats([]);
+        setNotifError("Notifications blocked by Firestore rules (list denied on /users/{uid}/sites/cc/chats).");
+      }
+    );
     return () => unsub();
   }, [user]);
+
+  useEffect(() => {
+    ensuredCommissionClientsRef.current = new Set();
+  }, [ownerUid]);
+
+  useEffect(() => {
+    if (!ownerUid) return;
+    if (ownerChats.length === 0) return;
+
+    const ensure = async () => {
+      for (const chat of ownerChats) {
+        if (!chat.clientId || !chat.userId) continue;
+        if (!chat.clientId.startsWith("u:")) continue;
+        const key = `${chat.clientId}|${chat.userId}`;
+        if (ensuredCommissionClientsRef.current.has(key)) continue;
+        try {
+          await ensureOwnerCommissionClient({
+            ownerId: ownerUid,
+            userId: chat.userId,
+            clientId: chat.clientId,
+            clientDisplayName: chat.clientDisplayName,
+          });
+          ensuredCommissionClientsRef.current.add(key);
+        } catch (err) {
+          console.error("ZZQ notifications ensure commission client failed:", err);
+        }
+      }
+    };
+
+    void ensure();
+  }, [ownerUid, ownerChats]);
 
   // Live list of linked users for the selected client
   useEffect(() => {
@@ -1937,6 +1985,9 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
                   {pushEnabled ? (pushBusy ? "Disabling…" : "Disable Push") : (pushBusy ? "Enabling…" : "Enable Push")}
                 </button>
               </div>
+              {notifError && (
+                <div className="mt-2 text-xs text-rose-400">{notifError}</div>
+              )}
               <ul className="mt-2 space-y-2">
                 {ownerChats.filter((c) => {
                   const lm = c.lastMessageAt?.toMillis?.() ?? 0;
@@ -1949,14 +2000,32 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
                       <span className="ml-2 inline-block px-1.5 py-0.5 text-[10px] rounded bg-red-500 text-white align-middle">New</span>
                     </div>
                     <button
-                      onClick={() => {
-                        const tgt = clients.find((cl) => cl.id === c.clientId);
-                        if (tgt) {
-                          setSelected(tgt);
-                          setPaneOpen(true);
-                          setLinkPanelOpen(true);
-                          setSelectedProjectId(null);
+                      onClick={async () => {
+                        if (!user || !c.clientId) return;
+                        if (c.clientId.startsWith("u:") && c.userId) {
+                          try {
+                            await ensureOwnerCommissionClient({
+                              ownerId: user.uid,
+                              userId: c.userId,
+                              clientId: c.clientId,
+                              clientDisplayName: c.clientDisplayName,
+                            });
+                          } catch (err) {
+                            console.error("ZZQ notifications ensure commission client failed:", err);
+                          }
                         }
+                        const existing = clients.find((cl) => cl.id === c.clientId);
+                        const fallback: Client = {
+                          id: c.clientId,
+                          displayName: c.clientDisplayName ?? "Client",
+                          username: null,
+                          notificationsEnabled: false,
+                        };
+                        const nextClient = existing ?? fallback;
+                        setSelected(nextClient);
+                        setPaneOpen(true);
+                        setLinkPanelOpen(true);
+                        setSelectedProjectId(null);
                       }}
                       className="ml-2 px-2 py-1 rounded-md border border-white/10 hover:bg-white/[0.06] text-xs"
                     >

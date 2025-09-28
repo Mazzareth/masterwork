@@ -12,6 +12,15 @@ service cloud.firestore {
     function notExpired(ts) {
       return ts == null || request.time < ts;
     }
+    // Lightweight project admin check (single-admin model)
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.email == "mercysquadrant@gmail.com";
+    }
+    function chatHasParticipant(chatId, uid) {
+      return uid != null
+        && get(/databases/$(database)/documents/chats/$(chatId)).data.participants != null
+        && (uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants);
+    }
 
     // Validation helpers for user profile doc (kept for compatibility)
     function hasValidProfile() {
@@ -30,10 +39,17 @@ service cloud.firestore {
     }
 
     // Users base doc
+    // Owners may read/write their own profile. The project admin (mercysquadrant) may list/read/update
+    // user documents to support administrative operations (for example, granting access by email).
     match /users/{uid} {
-      allow create: if isOwner(uid) && hasValidPermissions() && hasValidProfile();
-      allow read: if isOwner(uid);
-      allow update: if isOwner(uid) && hasValidPermissions() && hasValidProfile();
+      // Owner or admin may create their profile document (bootstrap)
+      allow create: if isOwner(uid) || isAdmin();
+      // Owner or admin may read the profile
+      allow get: if isOwner(uid) || isAdmin();
+      // Admin may list users to enable lookup by email; listing is restricted to the admin account
+      allow list: if isAdmin();
+      // Owner or admin may update the profile
+      allow update: if isOwner(uid) || isAdmin();
       allow delete: if false;
     }
 
@@ -121,10 +137,13 @@ service cloud.firestore {
       allow read, list, delete: if isOwner(ownerId);
       allow create, update: if isOwner(ownerId) || (
         isSignedIn()
-        && (request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants)
+        && chatHasParticipant(chatId, request.auth.uid)
         && request.resource.data.ownerId == ownerId
-        && request.resource.data.userId == request.auth.uid
         && request.resource.data.chatId == chatId
+        && (
+          request.resource.data.userId == request.auth.uid
+          || chatHasParticipant(chatId, request.resource.data.userId)
+        )
       );
     }
     // Client/self summaries remain self-owned only

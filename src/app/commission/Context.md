@@ -46,7 +46,8 @@
 
 ## UX Notes
 - Minimal form now (message only); attachments placeholder left for future.
-- After submit, user is redirected to CC chat; the artist will see the chat via owner summary.
+- On submit with no typed message, a system update “Started a commission request” is posted to ensure a visible unread signal for the artist.
+- After submit, user is redirected to CC chat; the artist will see the chat via owner summary/Notifications.
 - Slug management (create/copy) lives in ZZQ Settings.
 
 ## References
