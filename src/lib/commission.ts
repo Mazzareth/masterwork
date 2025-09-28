@@ -1,16 +1,11 @@
 import { db } from "./firebase";
 import {
-  addDoc,
-  collection,
   deleteDoc,
   doc,
   getDoc,
-  getDocs,
-  query,
   serverTimestamp,
   setDoc,
   Timestamp,
-  where,
 } from "firebase/firestore";
 
 import { deterministicChatId, ensureOwnerMirrorsForLink } from "./linking";

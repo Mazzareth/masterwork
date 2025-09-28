@@ -17,7 +17,7 @@ const entries: Entry[] = [
 ];
 
 export default function Home() {
-  const { user, profile, permissions, loading, loginWithGoogle, logout } = useAuth();
+  const { user, permissions, loading, loginWithGoogle } = useAuth();
 
   const visibleEntries =
     user && permissions

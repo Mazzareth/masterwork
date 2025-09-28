@@ -152,17 +152,6 @@ export default function ZZQPage() {
   const projectComposeInputRef = useRef<HTMLInputElement | null>(null);
   const [flashProjectId, setFlashProjectId] = useState<string | null>(null);
 
-  // Note composer (inside Client View → Notes)
-  const [noteComposeOpen, setNoteComposeOpen] = useState(false);
-  const [noteComposeText, setNoteComposeText] = useState("");
-  const [noteComposeProjectId, setNoteComposeProjectId] = useState<string | null>(null);
-  const noteComposeInputRef = useRef<HTMLInputElement | null>(null);
-
-  // Commission panel note composer (project-scoped)
-  const [commissionNoteComposeOpen, setCommissionNoteComposeOpen] = useState(false);
-  const [commissionNoteComposeText, setCommissionNoteComposeText] = useState("");
-  const commissionNoteComposeInputRef = useRef<HTMLInputElement | null>(null);
-
   // Linking/invite UI
   const [linkPanelOpen, setLinkPanelOpen] = useState(false);
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
@@ -277,7 +266,7 @@ export default function ZZQPage() {
         const el = aiListRef.current;
         if (el) el.scrollTop = el.scrollHeight;
       }, 0);
-    } catch (err) {
+    } catch {
       setAiMessages((prev) => [...prev, { role: "assistant", content: "Error: failed to reach DeepSeek." }]);
     } finally {
       setAiLoading(false);
@@ -362,16 +351,7 @@ export default function ZZQPage() {
     if (projectComposeOpen)
       setTimeout(() => projectComposeInputRef.current?.focus(), 0);
   }, [projectComposeOpen]);
-  useEffect(() => {
-    if (noteComposeOpen)
-      setTimeout(() => noteComposeInputRef.current?.focus(), 0);
-  }, [noteComposeOpen]);
-  useEffect(() => {
-    if (commissionNoteComposeOpen)
-      setTimeout(() => commissionNoteComposeInputRef.current?.focus(), 0);
-  }, [commissionNoteComposeOpen]);
-
-// Extra helpers for right-click context menu flows
+  // Extra helpers for right-click context menu flows
 const renameProject = async (p: Project) => {
   if (!user || !selected) return;
   const next = prompt("Rename project", p.title);
@@ -658,9 +638,6 @@ const deleteProjectCascade = async (projectId: string) => {
       count = 0;
     }
   };
-  const maybeCommit = async () => {
-    if (count >= 400) await commit();
-  };
 
   const notesSnap = await getDocs(collection(db, ...base, "notes"));
   notesSnap.forEach((n) => {
@@ -768,15 +745,10 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
       }
       if (isModShiftM && selected && selectedProjectId) {
         e.preventDefault();
-        setCommissionNoteComposeOpen(true);
-        setTimeout(() => commissionNoteComposeInputRef.current?.focus(), 0);
+        void createAndEditCommissionNote();
         return;
       }
       if (e.key === "Escape") {
-        if (commissionNoteComposeOpen) {
-          setCommissionNoteComposeOpen(false);
-          return;
-        }
         if (projectComposeOpen) {
           setProjectComposeOpen(false);
           return;
@@ -794,7 +766,7 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [paneOpen, projectPaneOpen, composeOpen, projectComposeOpen, noteComposeOpen, commissionNoteComposeOpen, selected, selectedProjectId, projects]);
+  }, [paneOpen, projectPaneOpen, composeOpen, projectComposeOpen, selected, selectedProjectId, projects]);
 
   // Live clients
   useEffect(() => {
@@ -1117,12 +1089,6 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
   }, [projectPaneOpen, scrollTargetNoteId]);
 
   // Memos
-  const projectById = useMemo(() => {
-    const map: Record<string, Project> = {};
-    projects.forEach((p) => (map[p.id] = p));
-    return map;
-  }, [projects]);
-
 
   const avgCompletion = useMemo(() => {
     if (projects.length === 0) return null;
@@ -1376,7 +1342,7 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
         count = 0;
       }
     };
-    const maybeCommit = async () => {
+    const commitIfNeeded = async () => {
       if (count >= 400) {
         await commit();
       }
@@ -1388,7 +1354,7 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
       batch.delete(d.ref);
       count++;
     });
-    await maybeCommit();
+    await commitIfNeeded();
 
     // projects and notes
     const projSnap = await getDocs(collection(db, ...base, "projects"));
@@ -1398,10 +1364,10 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
         batch.delete(n.ref);
         count++;
       });
-      await maybeCommit();
+      await commitIfNeeded();
       batch.delete(p.ref);
       count++;
-      await maybeCommit();
+      await commitIfNeeded();
     }
 
     // invites referencing this client
@@ -1472,66 +1438,7 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
     );
   };
   
-  const submitNoteCompose = async () => {
-    if (!user || !selected) return;
-    const text = noteComposeText.trim();
-    if (!text) return;
-    let pid = noteComposeProjectId;
-    if (!pid) {
-      if (selectedProjectId) pid = selectedProjectId;
-      else if (projects.length === 1) pid = projects[0].id;
-      else if (projects.length > 1) pid = projects[0].id;
-    }
-    if (!pid) return;
-    const colRef = collection(
-      db,
-      "users",
-      user.uid,
-      "sites",
-      "zzq",
-      "clients",
-      selected.id,
-      "projects",
-      pid,
-      "notes"
-    );
-    const docRef = await addDoc(colRef, {
-      text,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-    setNoteComposeOpen(false);
-    setNoteComposeText("");
-    // Open the project and focus the created note
-    openProjectByIdAndFocusNote(pid, docRef.id);
-  };
   
-  const submitCommissionNoteCompose = async () => {
-    if (!user || !selected || !selectedProjectId) return;
-    const text = commissionNoteComposeText.trim();
-    if (!text) return;
-    const colRef = collection(
-      db,
-      "users",
-      user.uid,
-      "sites",
-      "zzq",
-      "clients",
-      selected.id,
-      "projects",
-      selectedProjectId,
-      "notes"
-    );
-    const docRef = await addDoc(colRef, {
-      text,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-    setCommissionNoteComposeOpen(false);
-    setCommissionNoteComposeText("");
-    // Scroll to the newly created note in the open commission panel
-    setScrollTargetNoteId(docRef.id);
-  };
   
 
   const openProject = (p: Project) => {

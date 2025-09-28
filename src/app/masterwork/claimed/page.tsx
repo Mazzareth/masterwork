@@ -18,29 +18,41 @@ import {
   where,
   orderBy,
   serverTimestamp,
+  Timestamp,
 } from "firebase/firestore";
+
+type FirestoreTimestamp = Timestamp | ReturnType<typeof serverTimestamp> | null;
 
 type Task = {
   id: string;
   title: string;
   status?: "open" | "in_progress" | "done";
   assignedTo?: string | null;
-  createdAt?: any;
-  updatedAt?: any;
+  createdAt?: FirestoreTimestamp;
+  updatedAt?: FirestoreTimestamp;
   createdBy?: string | null;
 };
+
+type AllowlistEntry = {
+  uid: string;
+  email?: string | null;
+  grantedBy?: string | null;
+  createdAt?: FirestoreTimestamp;
+};
+
+type TaskDoc = Omit<Task, "id">;
+type AllowlistDoc = Omit<AllowlistEntry, "uid">;
 
 export default function ClaimedPage() {
   const { user, loading, loginWithGoogle } = useAuth();
   const [allowed, setAllowed] = useState<boolean | null>(null);
-  const [checking, setChecking] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [newTitle, setNewTitle] = useState("");
   const [message, setMessage] = useState<string | null>(null);
 
   // Allowlist (admin-managed)
-  const [allowlist, setAllowlist] = useState<Array<{ uid: string; email?: string }>>([]);
+  const [allowlist, setAllowlist] = useState<AllowlistEntry[]>([]);
   const [grantEmail, setGrantEmail] = useState("");
 
   useEffect(() => {
@@ -58,7 +70,6 @@ export default function ClaimedPage() {
     }
     let mounted = true;
     (async () => {
-      setChecking(true);
       try {
         const ref = doc(db, "masterwork", "claimed", "allowlist", user.uid);
         const snap = await getDoc(ref);
@@ -68,8 +79,6 @@ export default function ClaimedPage() {
         console.error("allowlist check failed", err);
         if (!mounted) return;
         setAllowed(false);
-      } finally {
-        if (mounted) setChecking(false);
       }
     })();
     return () => {
@@ -86,8 +95,10 @@ export default function ClaimedPage() {
     const col = collection(db, "masterwork", "claimed", "tasks");
     const q = query(col, orderBy("createdAt", "desc"));
     const unsub = onSnapshot(q, (snap) => {
-      const arr: Task[] = [];
-      snap.forEach((d) => arr.push({ id: d.id, ...(d.data() as any) }));
+      const arr = snap.docs.map((d) => {
+        const data = d.data() as TaskDoc;
+        return { id: d.id, ...data };
+      });
       setTasks(arr);
     });
     return () => unsub();
@@ -101,8 +112,10 @@ export default function ClaimedPage() {
     }
     const col = collection(db, "masterwork", "claimed", "allowlist");
     const unsub = onSnapshot(col, (snap) => {
-      const arr: Array<{ uid: string; email?: string }> = [];
-      snap.forEach((d) => arr.push({ uid: d.id, ...(d.data() as any) }));
+      const arr = snap.docs.map((d) => {
+        const data = d.data() as AllowlistDoc;
+        return { uid: d.id, ...data };
+      });
       setAllowlist(arr);
     });
     return () => unsub();

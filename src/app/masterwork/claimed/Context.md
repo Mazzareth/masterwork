@@ -14,6 +14,9 @@
 - Task document fields: title, status (open | in_progress | done), assignedTo, createdAt, updatedAt, createdBy.
 - Allowlist document fields: email, grantedBy, createdAt.
 
+## Type Safety (2025-09-28)
+- Firestore snapshots now map into typed payloads via [`TaskDoc`](src/app/masterwork/claimed/page.tsx:44) and [`AllowlistDoc`](src/app/masterwork/claimed/page.tsx:45), removing the previous `any` casts when subscribing to tasks and the allowlist.
+
 ## Security
 - Access enforced server-side by Firestore rules. See the rule additions in [`firebase/firestore.rules`](firebase/firestore.rules:163).
   - Read/write to tasks allowed only if the user is the admin (email mercysquadrant@gmail.com) OR an allowlist document exists for their uid.
