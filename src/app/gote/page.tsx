@@ -1056,7 +1056,8 @@ export default function BigGotePage() {
                     setInviteError(null);
                     setInviteUrl(null);
                     try {
-                      const res = await createGoteInvite({ ownerId: user.uid });
+                      // Reuse the currently selected chat when generating an invite from within it.
+                      const res = await createGoteInvite({ ownerId: user.uid, chatId: selectedChatId || undefined });
                       setInviteUrl(res.url);
                     } catch {
                       setInviteError("Failed to create invite");

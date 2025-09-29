@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { auth, googleProvider, db } from "../lib/firebase";
-import { onAuthStateChanged, signInWithPopup, signOut, User } from "firebase/auth";
+import { onAuthStateChanged, signInWithPopup, signInWithRedirect, signOut, User } from "firebase/auth";
 import { doc, getDoc, onSnapshot, serverTimestamp, setDoc, Timestamp, Unsubscribe } from "firebase/firestore";
 
 export type Permissions = {
@@ -135,7 +135,27 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   const loginWithGoogle = async () => {
-    await signInWithPopup(auth, googleProvider);
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (err: unknown) {
+      const code = String((err as any)?.code || "");
+      // Mobile or restrictive browser environments may block popups.
+      // Fallback to redirect-based sign-in which is more reliable on mobile.
+      if (
+        code === "auth/popup-blocked" ||
+        code === "auth/operation-not-supported-in-this-environment" ||
+        code === "auth/cancelled-popup-request" ||
+        code === "auth/popup-closed-by-user"
+      ) {
+        try {
+          await signInWithRedirect(auth, googleProvider);
+          return;
+        } catch (e) {
+          // If redirect also fails, surface the original error
+        }
+      }
+      throw err;
+    }
   };
 
   const logout = async () => {

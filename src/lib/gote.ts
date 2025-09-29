@@ -95,12 +95,15 @@ export async function createGoteInvite(params: {
   note?: string | null;
   aiDndEnabled?: boolean;
   scene?: string | null;
+  chatId?: string; // optional: reuse an existing chat instead of creating a new one
 }): Promise<{ token: string; url: string; chatId: string }> {
   const { ownerId, title = null, note = null, aiDndEnabled = false, scene = null } = params;
   const token = secureRandomToken(16);
   const expiresAt = params.expiresAt ?? defaultInviteExpiry(7);
-  const chatId = `g_${token}`;
+  // If a chatId is provided (inviting into an existing chat), reuse it; otherwise generate a new one.
+  const chatId = (params.chatId && params.chatId.trim()) ? params.chatId : `g_${token}`;
 
+  // Write invite under owner subtree
   const ref = doc(db, "users", ownerId, "sites", "gote", "invites", token);
   const payload: GoteInviteDoc = {
     token,
@@ -118,16 +121,20 @@ export async function createGoteInvite(params: {
   };
   await setDoc(ref, payload);
 
-  // Create owner-facing chat summary immediately so it appears in the list
+  // Ensure the owner-facing chat summary exists so it appears in the list.
+  // If reusing an existing chat, avoid clobbering createdAt; still refresh lastMessageAt for visibility.
   try {
+    const summary: Partial<GoteChatSummary> = {
+      chatId,
+      title,
+      lastMessageAt: serverTimestamp() as unknown as Timestamp,
+    };
+    if (!params.chatId) {
+      summary.createdAt = serverTimestamp() as unknown as Timestamp;
+    }
     await setDoc(
       doc(db, "users", ownerId, "sites", "gote", "chats", chatId),
-      {
-        chatId,
-        title,
-        createdAt: serverTimestamp() as unknown as Timestamp,
-        lastMessageAt: serverTimestamp() as unknown as Timestamp,
-      } as Partial<GoteChatSummary>,
+      summary,
       { merge: true }
     );
   } catch {

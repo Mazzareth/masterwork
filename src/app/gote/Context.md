@@ -100,6 +100,8 @@
   - Partner Information: displayed read-only (partner edits their own profile)
 
 ## Updates
+- 2025‑09‑29 — Mobile login reliability
+  - Added popup→redirect fallback in [loginWithGoogle()](src/contexts/AuthContext.tsx:137) to address mobile browsers blocking popups. This fixes cases where invitees could not sign in to accept a link.
 - 2025‑09‑29 — Invite link sign-in gating fix
   - The `/gote/link` route now requires the user to be signed in before validating the invite to avoid erroneous “Invalid Link” when signed out.
 - 2025‑09‑29 — Characters/States & Scene

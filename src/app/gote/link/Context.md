@@ -49,6 +49,8 @@
 ## Updates
 - 2025‑09‑29 — Sign-in gating fix for invite validation
   - The accept route now waits for the user to be signed in before reading the invite doc. This satisfies rules (isSignedIn()) for `/users/{ownerId}/sites/gote/invites/{token}` and prevents false “Invalid Link” errors when opening the URL while signed out. Rendering order prioritizes the login prompt ahead of invalid-link errors.
+- 2025‑09‑29 — Mobile popup fallback
+  - If the header Login triggers a popup error on mobile, [loginWithGoogle()](src/contexts/AuthContext.tsx:137) now falls back to `signInWithRedirect` to complete auth reliably.
 - 2025‑09‑29 — Clarified that invite acceptance grants BigGote permissions on the user doc so the header nav shows immediately; wired via [acceptGoteInvite()](src/lib/gote.ts:159).
 
 Did I explain the functionality clearly in Context.md? Yes.
