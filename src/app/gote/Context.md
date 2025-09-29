@@ -117,6 +117,8 @@
   - Firestore rules updated: profiles are participant‑writable, and inventories read/write/delete are allowed by participants. See [firebase/firestore.rules](firebase/firestore.rules:178).
 - 2025‑09‑29 — BigGote access gating fix
   - After invite acceptance, the header hotbar now shows “BigGote” immediately. [acceptGoteInvite()](src/lib/gote.ts:154) updates the nested permission and falls back to a merge write if needed. Header filters entries via [Header()](src/app/Header.tsx:11).
+- 2025‑09‑29 — Build hygiene
+  - Stabilized effects by memoizing default character state with useMemo at [src/app/gote/page.tsx:328](src/app/gote/page.tsx:328); removed unused helpers [src/app/gote/page.tsx:97](src/app/gote/page.tsx:97) and [src/app/gote/page.tsx:872](src/app/gote/page.tsx:872) to satisfy lint and unblock Vercel builds.
 - 2025‑09‑28 — Markdown/Resizers
   - Fixed text color for Markdown bubbles; added draggable resizers with bounds + localStorage
 - 2025‑09‑28 — Wiring

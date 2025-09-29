@@ -138,24 +138,28 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (err: unknown) {
-      const code = String((err as any)?.code || "");
-      // Mobile or restrictive browser environments may block popups.
-      // Fallback to redirect-based sign-in which is more reliable on mobile.
-      if (
-        code === "auth/popup-blocked" ||
-        code === "auth/operation-not-supported-in-this-environment" ||
-        code === "auth/cancelled-popup-request" ||
-        code === "auth/popup-closed-by-user"
-      ) {
-        try {
-          await signInWithRedirect(auth, googleProvider);
-          return;
-        } catch (e) {
-          // If redirect also fails, surface the original error
+        let code = "";
+        if (typeof err === "object" && err && "code" in err) {
+          const c = (err as { code?: unknown }).code;
+          code = typeof c === "string" ? c : String(c ?? "");
         }
+        // Mobile or restrictive browser environments may block popups.
+        // Fallback to redirect-based sign-in which is more reliable on mobile.
+        if (
+          code === "auth/popup-blocked" ||
+          code === "auth/operation-not-supported-in-this-environment" ||
+          code === "auth/cancelled-popup-request" ||
+          code === "auth/popup-closed-by-user"
+        ) {
+          try {
+            await signInWithRedirect(auth, googleProvider);
+            return;
+          } catch {
+            // If redirect also fails, surface the original error
+          }
+        }
+        throw err;
       }
-      throw err;
-    }
   };
 
   const logout = async () => {

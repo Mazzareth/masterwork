@@ -99,6 +99,8 @@ Would another engineer understand the purpose within 2 minutes? Yes.
 - Snapshot mappings cast to concrete Doc shapes; aggregated note sorting uses Timestamp.seconds.
 - Eliminated `any` for invites and links: casts to `Partial<InviteDoc>` and `Partial<ClientLink>` from [src/lib/linking.ts](src/lib/linking.ts).
 - React Hooks dependencies include `selected` where referenced to satisfy `react-hooks/exhaustive-deps`.
+- 2025‑09‑29 — Build hygiene
+  - Hoisted and wrapped [createAndEditCommissionNote()](src/app/zzq/page.tsx:714) in useCallback; referenced in the keyboard shortcuts effect at [src/app/zzq/page.tsx:721](src/app/zzq/page.tsx:721) to stabilize dependencies and fix TS “used before declaration”.
 
 ## Context Menu (Right-click)
 

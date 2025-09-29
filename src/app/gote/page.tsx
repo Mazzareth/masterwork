@@ -94,9 +94,6 @@ function renderMarkdownToHtml(md: string): string {
 }
  
 // Type helpers
-function isStringArray(u: unknown): u is string[] {
-  return Array.isArray(u) && u.every((s) => typeof s === "string");
-}
 function toStringList(u: unknown): string[] | undefined {
   return Array.isArray(u) ? u.filter((s): s is string => typeof s === "string") : undefined;
 }
@@ -325,7 +322,15 @@ export default function BigGotePage() {
 
   const [charProfileA, setCharProfileA] = useState<GoteCharacterProfileDoc | null>(null);
   const [charProfileB, setCharProfileB] = useState<GoteCharacterProfileDoc | null>(null);
-  const defaultCharState: GoteCharacterStateDoc = { statusTags: [], hunger: "Sated", thirst: "Quenched", oxygen: "Steady", clothing: [], accessories: [], updatedAt: null };
+  const defaultCharState = useMemo<GoteCharacterStateDoc>(() => ({
+    statusTags: [],
+    hunger: "Sated",
+    thirst: "Quenched",
+    oxygen: "Steady",
+    clothing: [],
+    accessories: [],
+    updatedAt: null,
+  }), []);
   const [charStateA, setCharStateA] = useState<GoteCharacterStateDoc>(defaultCharState);
   const [charStateB, setCharStateB] = useState<GoteCharacterStateDoc>(defaultCharState);
 
@@ -868,15 +873,6 @@ export default function BigGotePage() {
     }
   };
 
-  // Persistence helpers for profile fields
-  const saveSelfProfile = async (patch: Partial<{ displayName: string; avatarUrl: string; charInfo: string; position: PositionType; role: RoleType }>) => {
-    if (!user || !selectedChatId || !chatReady) return;
-    try {
-      await setDoc(doc(db, "goteChats", selectedChatId, "profiles", user.uid), patch as Record<string, unknown>, { merge: true });
-    } catch {
-      // ignore until rules deployed client-side; should pass once /profiles rules are active
-    }
-  };
 
 
   // Gates

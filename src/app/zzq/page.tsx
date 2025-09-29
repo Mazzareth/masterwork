@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { db } from "../../lib/firebase";
@@ -711,6 +711,34 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
     // no-op
   }
 };
+  // Define as a stable callback so effects depending on it don't thrash
+  const createAndEditCommissionNote = useCallback(async () => {
+    if (!user || !selected || !selectedProjectId) return;
+    const colRef = collection(
+      db,
+      "users",
+      user.uid,
+      "sites",
+      "zzq",
+      "clients",
+      selected.id,
+      "projects",
+      selectedProjectId,
+      "notes"
+    );
+    const docRef = await addDoc(colRef, {
+      text: "",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    setEditingNoteId(docRef.id);
+    setScrollTargetNoteId(docRef.id);
+    setTimeout(() => {
+      const ta = document.querySelector<HTMLTextAreaElement>(`#note-${docRef.id} textarea`);
+      ta?.focus();
+    }, 0);
+  }, [user, selected, selectedProjectId]);
+
   // Keyboard UX:
   // - Ctrl/Cmd+K: focus search
   // - Ctrl/Cmd+N: open Client Quick Add
@@ -1206,32 +1234,7 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
     }, 0);
   };
 
-  async function createAndEditCommissionNote() {
-    if (!user || !selected || !selectedProjectId) return;
-    const colRef = collection(
-      db,
-      "users",
-      user.uid,
-      "sites",
-      "zzq",
-      "clients",
-      selected.id,
-      "projects",
-      selectedProjectId,
-      "notes"
-    );
-    const docRef = await addDoc(colRef, {
-      text: "",
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-    setEditingNoteId(docRef.id);
-    setScrollTargetNoteId(docRef.id);
-    setTimeout(() => {
-      const ta = document.querySelector<HTMLTextAreaElement>(`#note-${docRef.id} textarea`);
-      ta?.focus();
-    }, 0);
-  }
+  // moved: createAndEditCommissionNote is defined earlier via useCallback for stable dependencies
 
   const filtered = useMemo(() => {
     const t = dq.trim().toLowerCase();
