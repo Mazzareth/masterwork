@@ -12,6 +12,12 @@
   - Exports `auth`, `googleProvider`, and `db`.
 - [src/lib/linking.ts](src/lib/linking.ts)
   - Utilities for the client-linking flow and chats (invite creation/acceptance, deterministic chat id, send message).
+- [src/lib/gote.ts](src/lib/gote.ts)
+  - BigGote invites and chat utilities (goteChats, gote invites, per-user summaries; accept flow and send message/update helpers).
+  - `createGoteInvite()`: returns `{ token, url, chatId }`; stores the invite with a unique `chatId` and creates an owner stub summary at `/users/{ownerId}/sites/gote/chats/{chatId}` with `lastMessageAt=serverTimestamp()` so the chat appears immediately at the top of the list.
+  - `acceptGoteInvite()`: uses `invite.chatId` if present (avoids overwriting any existing chat) or falls back to a deterministic id for legacy invites; ensures `/goteChats/{chatId}` with participants; initializes `aiDndEnabled` from the invite; mirrors `title` to per‑user summaries; marks invite `used`; merges `permissions.gote = true` into `/users/{uid}`.
+  - `sendGoteChatMessage()` / `sendGoteChatUpdate()`: write messages and mirror `lastMessageAt` onto per‑user chat summaries.
+  - Inventory helpers: [`readGoteInventory()`](src/lib/gote.ts:410), [`patchGoteInventory()`](src/lib/gote.ts:446) using `/goteChats/{chatId}/inventories/{uid}` docs (`items[]`, `updatedAt`).
 - [src/lib/notifications.ts](src/lib/notifications.ts)
   - [`ensurePushPermissionAndToken()`](src/lib/notifications.ts:21): Requests permission, registers `/firebase-messaging-sw.js`, obtains an FCM token with `NEXT_PUBLIC_FIREBASE_VAPID_KEY`, and persists it to `/users/{uid}/notificationTokens/{token}`.
   - [`subscribeToForegroundMessages()`](src/lib/notifications.ts:96): Foreground FCM listener for in-app toasts.
@@ -51,3 +57,28 @@
   - This satisfies the rule constraints in [firebase/firestore.rules](firebase/firestore.rules:131) for participant-created/updated owner summaries.
 - Correction: The stable chat id helper is [deterministicChatId()](src/lib/linking.ts:97) (previous docs referenced an older name).
 - Validation: From a non-owner account, use `/commission/{slug}` and submit a request. The owner should now see a “New” entry in ZZQ → Notifications without any permission errors.
+
+## Updates (2025-09-29)
+- BigGote access gating fix: [acceptGoteInvite()](src/lib/gote.ts:158) now updates the nested permission ("permissions.gote") using update semantics with a fallback merge write to create the user doc if missing. This ensures the Masterwork header shows BigGote immediately after acceptance and unlocks the Invite panel for the new participant. Header filter: [Header()](src/app/Header.tsx:11).
+
+## New (Characters & States, 2025-09-29)
+- Character Profiles (player-provided at chat setup; read-only thereafter in UI)
+  - Path: [goteChats/{chatId}/characters/{uid}](firebase/firestore.rules)
+  - Fields: name, height, weight, dickFlaccid, dickErect, build ("Skinny|Slim|Average|Muscular|Plump"), weaknesses (text), kinks (string[])
+  - Helpers: see [src/lib/gote.ts](src/lib/gote.ts)
+- Character State (Narrator/AI-managed during the story; defaults to mid-levels)
+  - Path: [goteChats/{chatId}/states/{uid}](firebase/firestore.rules)
+  - Fields:
+    - statusTags: string[] (e.g., "Stunned", "Shocked")
+    - hunger: "Famished|Hungry|Sated|Full|Engorged" (default: Sated)
+    - thirst: "Parched|Thirsty|Quenched|Hydrated|Saturated" (default: Quenched)
+    - oxygen: "Suffocating|Winded|Steady|Oxygenated|Brimming" (default: Steady)
+    - clothing: string[]
+    - accessories: string[]
+  - Enumerations/constants exported from [src/lib/gote.ts](src/lib/gote.ts): build options and level lists with defaults.
+  - Helpers: read and patch state with additive/set/remove semantics.
+- Inventory remains at [goteChats/{chatId}/inventories/{uid}](firebase/firestore.rules) with additive/set/remove operations.
+
+Design notes:
+- Characters are self-authored by the player at creation/join; states are adjusted by the Narrator (executed client-side by participants), consistent with existing permissions for profiles/inventories.
+- Mid-level defaults: Hunger=Sated, Thirst=Quenched, Oxygen=Steady.

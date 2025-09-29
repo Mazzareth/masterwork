@@ -15,6 +15,7 @@ export default function Header() {
   const entries: Entry[] = useMemo(() => {
     if (!user || !permissions) return [];
     const base: Entry[] = [
+      { key: "gote", href: "/gote", label: PAGE_LABELS.gote },
       { key: "zzq", href: "/zzq", label: PAGE_LABELS.zzq },
       { key: "cc", href: "/cc", label: PAGE_LABELS.cc },
       { key: "inhouse", href: "/inhouse", label: PAGE_LABELS.inhouse },

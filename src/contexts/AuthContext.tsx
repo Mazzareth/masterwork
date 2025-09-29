@@ -9,6 +9,7 @@ export type Permissions = {
   zzq: boolean;
   cc: boolean;
   inhouse: boolean;
+  gote: boolean;
 };
 
 export type UserProfile = {
@@ -34,7 +35,7 @@ type AuthContextType = {
   logout: () => Promise<void>;
 };
 
-const defaultPermissions: Permissions = { zzq: true, cc: false, inhouse: false };
+const defaultPermissions: Permissions = { zzq: true, cc: false, inhouse: false, gote: false };
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
@@ -87,14 +88,25 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         };
         await setDoc(userRef, newDoc);
       } else {
-        // Merge profile refresh and, if missing, permissions in a single write
+        // Merge profile refresh and ensure permission keys exist (forward-compatible).
+        // Preserves existing permission values while adding any new keys (e.g., "gote").
         const data = snap.data() as Partial<UserDoc>;
-        const updatePayload = {
-          profile: baseProfile,
-          updatedAt: serverTimestamp(),
-          ...(data.permissions ? {} : { permissions: defaultPermissions }),
+        const existingPerms = (data.permissions ?? {}) as Partial<Permissions>;
+        const mergedPerms: Permissions = {
+          zzq: existingPerms.zzq ?? defaultPermissions.zzq,
+          cc: existingPerms.cc ?? defaultPermissions.cc,
+          inhouse: existingPerms.inhouse ?? defaultPermissions.inhouse,
+          gote: existingPerms.gote ?? false,
         };
-        await setDoc(userRef, updatePayload, { merge: true });
+        await setDoc(
+          userRef,
+          {
+            profile: baseProfile,
+            permissions: mergedPerms,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
       }
 
       // Live subscribe to user document for permission changes

@@ -766,7 +766,7 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [paneOpen, projectPaneOpen, composeOpen, projectComposeOpen, selected, selectedProjectId, projects]);
+  }, [paneOpen, projectPaneOpen, composeOpen, projectComposeOpen, selected, selectedProjectId, projects, createAndEditCommissionNote]);
 
   // Live clients
   useEffect(() => {
@@ -1206,7 +1206,7 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
     }, 0);
   };
 
-  const createAndEditCommissionNote = async () => {
+  async function createAndEditCommissionNote() {
     if (!user || !selected || !selectedProjectId) return;
     const colRef = collection(
       db,
@@ -1231,7 +1231,7 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
       const ta = document.querySelector<HTMLTextAreaElement>(`#note-${docRef.id} textarea`);
       ta?.focus();
     }, 0);
-  };
+  }
 
   const filtered = useMemo(() => {
     const t = dq.trim().toLowerCase();
@@ -2230,7 +2230,7 @@ const requestDeleteNote = async (projectId: string, noteId: string) => {
                                   clientDisplayName: selected.displayName,
                                 });
                                 setInviteUrl(res.url);
-                              } catch (e) {
+                              } catch {
                                 setInviteError("Failed to create invite");
                               } finally {
                                 setInviteBusy(false);

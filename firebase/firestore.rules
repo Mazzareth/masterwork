@@ -21,6 +21,11 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/chats/$(chatId)).data.participants != null
         && (uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants);
     }
+    function goteChatHasParticipant(chatId, uid) {
+      return uid != null
+        && get(/databases/$(database)/documents/goteChats/$(chatId)).data.participants != null
+        && (uid in get(/databases/$(database)/documents/goteChats/$(chatId)).data.participants);
+    }
 
     // Validation helpers for user profile doc (kept for compatibility)
     function hasValidProfile() {
@@ -35,7 +40,8 @@ service cloud.firestore {
         (request.resource.data.permissions is map) &&
         (request.resource.data.permissions.zzq is bool) &&
         (request.resource.data.permissions.cc is bool) &&
-        (request.resource.data.permissions.inhouse is bool);
+        (request.resource.data.permissions.inhouse is bool) &&
+        (request.resource.data.permissions.gote is bool);
     }
 
     // Users base doc
@@ -55,6 +61,11 @@ service cloud.firestore {
 
     // ZZQ owner-only subtree (owner may manage all their ZZQ data)
     match /users/{uid}/sites/zzq/{document=**} {
+      allow read, write: if isOwner(uid);
+    }
+
+    // BigGote owner-only subtree (owner may manage all their BigGote data)
+    match /users/{uid}/sites/gote/{document=**} {
       allow read, write: if isOwner(uid);
     }
 
@@ -89,6 +100,39 @@ service cloud.firestore {
          && request.resource.data.usedBy == request.auth.uid)
       );
   
+      // Owner may delete
+      allow delete: if isOwner(ownerId);
+    }
+
+    // Invites for BigGote (under owner subtree)
+    // Same semantics as ZZQ invites; tokens are not listable by invitees
+    match /users/{ownerId}/sites/gote/invites/{token} {
+      // Invitee preflight GET
+      allow get: if isSignedIn()
+                 && resource.data.status == "active"
+                 && notExpired(resource.data.expiresAt);
+
+      // Only the owner can list their invites
+      allow list: if isOwner(ownerId);
+
+      // Owner creates active invite
+      allow create: if isOwner(ownerId)
+        && request.resource.data.ownerId == ownerId
+        && request.resource.data.status == "active";
+
+      // Owner may revoke; accepting user may mark as used
+      allow update: if (
+        // Owner revoke/maintenance (owner cannot directly mark "used")
+        (isOwner(ownerId) && !(request.resource.data.status == "used"))
+        ||
+        // Accepting user updates to "used"
+        (isSignedIn()
+         && resource.data.status == "active"
+         && notExpired(resource.data.expiresAt)
+         && request.resource.data.status == "used"
+         && request.resource.data.usedBy == request.auth.uid)
+      );
+
       // Owner may delete
       allow delete: if isOwner(ownerId);
     }
@@ -129,6 +173,94 @@ service cloud.firestore {
                get(/databases/$(database)/documents/chats/$(chatId)).data.participants);
         allow update, delete: if false;
       }
+    }
+
+    // BigGote canonical chats (separate collection)
+    match /goteChats/{chatId} {
+      // Create requires caller to be included in the participants array
+      allow create: if isSignedIn()
+        && (request.auth.uid in request.resource.data.participants);
+
+      // Read/Update require caller to be an existing participant
+      allow get, update: if isSignedIn()
+        && (request.auth.uid in resource.data.participants);
+
+      // Disallow chat enumeration and deletion
+      allow list: if false;
+      allow delete: if false;
+
+      // Profiles (per-chat display profiles; readable by participants; update allowed by any chat participant)
+      match /profiles/{uid} {
+        allow read: if isSignedIn()
+          && (request.auth.uid in
+               get(/databases/$(database)/documents/goteChats/$(chatId)).data.participants);
+        // Allow any chat participant to create/update any profile in this chat to support "Omnipotent Narrator" actions.
+        allow create, update: if isSignedIn()
+          && (request.auth.uid in
+               get(/databases/$(database)/documents/goteChats/$(chatId)).data.participants);
+        allow delete: if false;
+      }
+
+      // Characters (per-chat, per-player; player-provided, not editable post-create)
+      match /characters/{uid} {
+        // Visible to chat participants
+        allow read: if isSignedIn()
+          && (request.auth.uid in
+               get(/databases/$(database)/documents/goteChats/$(chatId)).data.participants);
+        // Only the owner of uid may create their own character profile
+        allow create: if isSignedIn()
+          && (request.auth.uid in
+               get(/databases/$(database)/documents/goteChats/$(chatId)).data.participants)
+          && (request.auth.uid == uid);
+        // Prevent edits by players to keep character info immutable during play (admin may update via console)
+        allow update, delete: if false;
+      }
+
+      // States (per-chat, per-player; Narrator/AI-managed)
+      match /states/{uid} {
+        // Visible to chat participants
+        allow read: if isSignedIn()
+          && (request.auth.uid in
+               get(/databases/$(database)/documents/goteChats/$(chatId)).data.participants);
+        // Create/Update allowed by any chat participant (client executes AI/Narrator actions)
+        allow create, update: if isSignedIn()
+          && (request.auth.uid in
+               get(/databases/$(database)/documents/goteChats/$(chatId)).data.participants);
+        allow delete: if false;
+      }
+
+      // Inventories (per-chat, per-player)
+      // Allows the AI/Narrator (executed by either participant) to modify either participant's inventory.
+      match /inventories/{uid} {
+        // Visible to chat participants
+        allow read: if isSignedIn()
+          && (request.auth.uid in
+               get(/databases/$(database)/documents/goteChats/$(chatId)).data.participants);
+        // Create/Update/Delete allowed by any chat participant
+        allow create, update, delete: if isSignedIn()
+          && (request.auth.uid in
+               get(/databases/$(database)/documents/goteChats/$(chatId)).data.participants);
+      }
+
+      // Messages under a chat (permission derived from parent chat)
+      match /messages/{messageId} {
+        allow read, create: if isSignedIn()
+          && (request.auth.uid in
+               get(/databases/$(database)/documents/goteChats/$(chatId)).data.participants);
+        allow update, delete: if false;
+      }
+    }
+
+    // BigGote per-user Chat Summaries (owner + participant mirroring)
+    match /users/{ownerId}/sites/gote/chats/{chatId} {
+      // Owner can manage their summaries fully
+      allow read, list, delete: if isOwner(ownerId);
+      // Allow chat participants to create/update the owner's summary for discoverability
+      allow create, update: if isOwner(ownerId) || (
+        isSignedIn()
+        && goteChatHasParticipant(chatId, request.auth.uid)
+        && request.resource.data.chatId == chatId
+      );
     }
 
     // Per-user Chat Summaries (owner and client)

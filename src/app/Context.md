@@ -20,6 +20,7 @@
       - If signed in: grid of destination cards, filtered by `pageVisibility` and Firestore `permissions`.
       - Cards are accessible, hover-elevated, and responsive.
 - Routes (with auth/permission gates):
+  - [src/app/gote/page.tsx](src/app/gote/page.tsx)
   - [src/app/zzq/page.tsx](src/app/zzq/page.tsx)
   - [src/app/cc/page.tsx](src/app/cc/page.tsx)
   - [src/app/inhouse/page.tsx](src/app/inhouse/page.tsx)

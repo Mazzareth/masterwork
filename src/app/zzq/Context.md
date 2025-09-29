@@ -6,6 +6,9 @@
 - All data is stored per-user in Firestore under the user profile in a site-specific subtree.
 - New: Client linking tools allow owners to generate invitation links that let clients chat in CC. Internal ZZQ data remains private.
 
+## Feature Summary
+ZZQ is an AI-powered CRM for artists that presents a searchable Clients sidebar and a focused per‑client workspace. Each Client stores a Name and optional @username; Projects live under a client with a status chip, a single completion indicator, and free‑form Notes that edit inline with lightweight Markdown. A floating "ZZQ AI" button opens a slide‑up chat panel that can see your Clients and, when a client is selected, that client’s Projects to answer questions and guide next actions—without leaving the page. Client linking for shared chat, quick add flows, inline editing, and optimistic interactions keep you moving while slide‑in panels preserve context.
+
 ## UI/Flow
 - Left panel (sticky):
   - Search input (client name or discord username).

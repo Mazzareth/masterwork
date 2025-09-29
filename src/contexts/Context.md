@@ -2,7 +2,7 @@
 
 ## Overview
 - Client-side authentication context providing Google Sign-In, user profile, and permissions from Firestore.
-- Bootstraps a user document on first login with default permissions (ZZQ = true, CC/InHouse = false).
+- Bootstraps a user document on first login with default permissions (ZZQ = true, CC/InHouse/Gote = false).
 - Subscribes to live changes of the user document to keep permissions fresh across the app.
 
 ## Components

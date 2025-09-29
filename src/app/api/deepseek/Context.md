@@ -17,6 +17,7 @@
 
 ## Integration
 - Called by the ZZQ UI slide-up panel at [`src/app/zzq/page.tsx`](src/app/zzq/page.tsx:194) which builds a system message containing the owner's clients and projects as context.
+- Called by BigGote "Finish Turn" in [`handleFinishTurn()`](src/app/gote/page.tsx:452) to generate a narrator message and structured actions (profile edits, inventories) from current chat context.
 - The client should send only the minimal context needed; sensitive data should be kept server-side and not embedded directly in client-sent messages unless intentionally included.
 
 ## Files

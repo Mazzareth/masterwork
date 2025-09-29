@@ -2,7 +2,7 @@
 
 ## Overview
 - Firestore security rules live at [`firebase/firestore.rules`](firebase/firestore.rules:1).
-- Rules protect per-user data (ZZQ), canonical chats, invites, commission slugs, and other site-specific subtrees.
+- Rules protect per-user data (ZZQ, BigGote), canonical chats (chats and goteChats), invites (zzq and gote), commission slugs, and other site-specific subtrees.
 
 ## Recent changes (2025-09-26)
 - Introduced a lightweight admin helper `isAdmin()` that checks the authenticated user's email (currently "mercysquadrant@gmail.com").
@@ -36,3 +36,14 @@
 ## Next steps
 - If the permission error persists, paste the console error including the Firestore document path or confirm which account (email/uid) you're signed in as so I can further adjust rules safely.
 - Recommended: migrate admin check to UID or role claim to avoid brittle email-based checks.
+
+## Updates (2025-09-28)
+- BigGote Chat Creation & Access
+  - Added participant-gated per-user summary rule for BigGote at `/users/{ownerId}/sites/gote/chats/{chatId}` so chat participants can create/update the owner’s summary for discoverability. See [firebase/firestore.rules](firebase/firestore.rules).
+  - Introduced a helper for checking participants in `/goteChats/{chatId}` within rules. See [firebase/firestore.rules](firebase/firestore.rules).
+  - Accepting a BigGote invite may set `permissions.gote = true` on the invitee’s `/users/{uid}` (client-merged) to surface the BigGote nav immediately; the BigGote page also falls back to a summary probe for access. See [src/lib/gote.ts](src/lib/gote.ts) and [src/app/gote/page.tsx](src/app/gote/page.tsx).
+
+## Updates (2025-09-29)
+- BigGote Omnipotent Narrator + Inventories
+  - Profiles under `/goteChats/{chatId}/profiles/{uid}` are now create/updateable by any chat participant (previously only matching `uid`), enabling AI-driven character adjustments. See [firebase/firestore.rules](firebase/firestore.rules:192).
+  - New per-chat, per-player inventories at `/goteChats/{chatId}/inventories/{uid}` with read/write/delete allowed for participants. See [firebase/firestore.rules](firebase/firestore.rules:204).
