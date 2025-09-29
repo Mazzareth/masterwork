@@ -1028,8 +1028,13 @@ export default function BigGotePage() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setInviteOpen((v) => !v)}
-                  className="px-2.5 py-1.5 rounded-md border border-white/20 text-sm text-white/80 hover:bg-white/[0.06]"
-                  title={inviteOpen ? "Hide invite tools" : "Generate invite link"}
+                  disabled={!selectedChatId}
+                  className="px-2.5 py-1.5 rounded-md border border-white/20 text-sm text-white/80 hover:bg-white/[0.06] disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={
+                    !selectedChatId
+                      ? "Select an existing chat or create a new chat first"
+                      : (inviteOpen ? "Hide invite tools" : "Invite to this chat")
+                  }
                 >
                   Invite
                 </button>
@@ -1047,6 +1052,9 @@ export default function BigGotePage() {
                 >
                   Close
                 </button>
+              </div>
+              <div className="mt-1 text-xs text-white/60">
+                Target chat: {filteredChats.find((c) => c.chatId === selectedChatId)?.title || (selectedChatId ? selectedChatId : "—")}
               </div>
               <div className="mt-2 flex items-center gap-2">
                 <button

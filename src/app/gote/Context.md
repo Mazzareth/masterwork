@@ -100,6 +100,8 @@
   - Partner Information: displayed read-only (partner edits their own profile)
 
 ## Updates
+- 2025‑09‑29 — Invite generation targeting
+  - The “Invite” button now targets the currently selected chat and is disabled when none is selected to prevent accidental creation of a new chat. The invite panel shows the target chat title for clarity. Links reuse the selected chatId via [createGoteInvite()](src/lib/gote.ts:91).
 - 2025‑09‑29 — Mobile login reliability
   - Added popup→redirect fallback in [loginWithGoogle()](src/contexts/AuthContext.tsx:137) to address mobile browsers blocking popups. This fixes cases where invitees could not sign in to accept a link.
 - 2025‑09‑29 — Invite link sign-in gating fix

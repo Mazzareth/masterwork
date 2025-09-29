@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "../../../contexts/AuthContext";
@@ -25,6 +25,7 @@ function GoteLinkAcceptPageInner() {
   const token = params.get("token") ?? "";
 
   const [state, setState] = useState<State>({ phase: "idle" });
+  const validatedKeyRef = useRef<string | null>(null);
 
   const isParamsValid = useMemo(() => {
     return ownerId.length > 0 && token.length > 0;
@@ -44,8 +45,11 @@ function GoteLinkAcceptPageInner() {
       return;
     }
 
-    // Avoid re-entrant validation
-    if (state.phase === "validating") return;
+    // De-dup validation for a given user+invite combo to prevent flicker
+    const key = `${user.uid}:${ownerId}:${token}`;
+    if (validatedKeyRef.current === key) {
+      return;
+    }
 
     setState({ phase: "validating" });
     (async () => {
@@ -55,6 +59,7 @@ function GoteLinkAcceptPageInner() {
           setState({ phase: "error", message: "Invite not found, used, or revoked." });
           return;
         }
+        validatedKeyRef.current = key;
         setState({ phase: "ready", ownerId, token });
       } catch {
         setState({
@@ -63,7 +68,7 @@ function GoteLinkAcceptPageInner() {
         });
       }
     })();
-  }, [isParamsValid, ownerId, token, user, loading, state.phase]);
+  }, [isParamsValid, ownerId, token, user, loading]);
 
   const onAccept = async () => {
     if (!user) return;

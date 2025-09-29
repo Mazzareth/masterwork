@@ -47,6 +47,8 @@
 - Rules: [firebase/firestore.rules](firebase/firestore.rules)
 
 ## Updates
+- 2025‑09‑29 — Validation flicker mitigation
+  - Deduplicated invite validation per user+invite combination using a memoized key and ref to prevent re-running validation unnecessarily, reducing UI flicker on mobile. See [GoteLinkAcceptPageInner()](src/app/gote/link/page.tsx:19).
 - 2025‑09‑29 — Sign-in gating fix for invite validation
   - The accept route now waits for the user to be signed in before reading the invite doc. This satisfies rules (isSignedIn()) for `/users/{ownerId}/sites/gote/invites/{token}` and prevents false “Invalid Link” errors when opening the URL while signed out. Rendering order prioritizes the login prompt ahead of invalid-link errors.
 - 2025‑09‑29 — Mobile popup fallback
