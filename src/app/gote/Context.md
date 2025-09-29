@@ -100,6 +100,8 @@
   - Partner Information: displayed read-only (partner edits their own profile)
 
 ## Updates
+- 2025‑09‑29 — Invite link sign-in gating fix
+  - The `/gote/link` route now requires the user to be signed in before validating the invite to avoid erroneous “Invalid Link” when signed out.
 - 2025‑09‑29 — Characters/States & Scene
   - Added per-player immutable Character Profiles at `/goteChats/{chatId}/characters/{uid}` (player-authored during setup) and Narrator-managed Character States at `/goteChats/{chatId}/states/{uid}` with mid-level defaults (Hunger=Sated, Thirst=Quenched, Oxygen=Steady). Rules allow players to create their own Character Profile and any participant to update States.
   - New Chat: optional "Scene" field stored on `/goteChats/{chatId}.scene`, rendered at the top of the chat and included in AI context.

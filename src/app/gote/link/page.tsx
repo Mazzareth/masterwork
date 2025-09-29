@@ -31,14 +31,23 @@ function GoteLinkAcceptPageInner() {
   }, [ownerId, token]);
 
   useEffect(() => {
-    if (state.phase !== "idle") return;
     if (!isParamsValid) {
       setState({ phase: "error", message: "Invalid or missing link parameters." });
       return;
     }
-    setState({ phase: "validating" });
+    if (loading) return; // wait for auth to resolve
 
-    // Preflight read to surface rules issues early (must be allowed by rules)
+    // Require sign-in before validation (rules require isSignedIn())
+    if (!user) {
+      // Prepare UI; validate after login
+      setState({ phase: "ready", ownerId, token });
+      return;
+    }
+
+    // Avoid re-entrant validation
+    if (state.phase === "validating") return;
+
+    setState({ phase: "validating" });
     (async () => {
       try {
         const snap = await getDoc(doc(db, "users", ownerId, "sites", "gote", "invites", token));
@@ -50,12 +59,11 @@ function GoteLinkAcceptPageInner() {
       } catch {
         setState({
           phase: "error",
-          message:
-            "Unable to read invite (permissions). Ensure Firestore rules allow GET on /users/{ownerId}/sites/gote/invites/{token} for signed-in users when active.",
+          message: "Unable to read invite. Sign in and ensure the invite is active and not expired.",
         });
       }
     })();
-  }, [state.phase, isParamsValid, ownerId, token]);
+  }, [isParamsValid, ownerId, token, user, loading, state.phase]);
 
   const onAccept = async () => {
     if (!user) return;
@@ -103,14 +111,14 @@ function GoteLinkAcceptPageInner() {
     );
   }
 
-  // Invalid/error
-  if (!isParamsValid || state.phase === "error") {
+  // Require params
+  if (!isParamsValid) {
     return (
       <div className="min-h-screen grid place-items-center bg-black text-white p-6">
         <div className="w-full max-w-md rounded-lg border border-white/15 bg-white/[0.03] p-5">
           <h1 className="text-xl font-semibold mb-2">Invalid Link</h1>
           <p className="text-white/70 mb-4">
-            {state.phase === "error" ? state.message : "The link is missing required parameters."}
+            The link is missing required parameters.
           </p>
           <Link href="/" className="text-sm text-white/80 hover:underline">
             Back to Home
@@ -120,7 +128,7 @@ function GoteLinkAcceptPageInner() {
     );
   }
 
-  // Require sign-in
+  // Require sign-in first (rules require it to read the invite)
   if (!user) {
     return (
       <div className="min-h-screen grid place-items-center bg-black text-white p-6">
@@ -136,6 +144,23 @@ function GoteLinkAcceptPageInner() {
             Login with Google
           </button>
           <Link href="/" className="mt-3 text-sm text-white/80 hover:underline">
+            Back to Home
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  // Error after validation
+  if (state.phase === "error") {
+    return (
+      <div className="min-h-screen grid place-items-center bg-black text-white p-6">
+        <div className="w-full max-w-md rounded-lg border border-white/15 bg-white/[0.03] p-5">
+          <h1 className="text-xl font-semibold mb-2">Invalid Link</h1>
+          <p className="text-white/70 mb-4">
+            {state.message}
+          </p>
+          <Link href="/" className="text-sm text-white/80 hover:underline">
             Back to Home
           </Link>
         </div>
