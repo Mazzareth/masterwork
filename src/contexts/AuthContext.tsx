@@ -6,6 +6,7 @@ import { onAuthStateChanged, signInWithPopup, signInWithRedirect, signOut, User 
 import { doc, getDoc, onSnapshot, serverTimestamp, setDoc, Timestamp, Unsubscribe } from "firebase/firestore";
 
 export type Permissions = {
+  teach: boolean;
   zzq: boolean;
   cc: boolean;
   inhouse: boolean;
@@ -35,7 +36,7 @@ type AuthContextType = {
   logout: () => Promise<void>;
 };
 
-const defaultPermissions: Permissions = { zzq: true, cc: false, inhouse: false, gote: false };
+const defaultPermissions: Permissions = { teach: true, zzq: false, cc: false, inhouse: false, gote: false };
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
@@ -82,7 +83,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (!snap.exists()) {
         const newDoc = {
           profile: baseProfile,
-          permissions: defaultPermissions, // Default access: ZZQ only
+          permissions: defaultPermissions, // Default access: Teach only
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         };
@@ -93,10 +94,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         const data = snap.data() as Partial<UserDoc>;
         const existingPerms = (data.permissions ?? {}) as Partial<Permissions>;
         const mergedPerms: Permissions = {
+          teach: existingPerms.teach ?? defaultPermissions.teach,
           zzq: existingPerms.zzq ?? defaultPermissions.zzq,
           cc: existingPerms.cc ?? defaultPermissions.cc,
           inhouse: existingPerms.inhouse ?? defaultPermissions.inhouse,
-          gote: existingPerms.gote ?? false,
+          gote: existingPerms.gote ?? defaultPermissions.gote,
         };
         await setDoc(
           userRef,

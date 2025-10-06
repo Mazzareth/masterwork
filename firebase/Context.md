@@ -47,3 +47,15 @@
 - BigGote Omnipotent Narrator + Inventories
   - Profiles under `/goteChats/{chatId}/profiles/{uid}` are now create/updateable by any chat participant (previously only matching `uid`), enabling AI-driven character adjustments. See [firebase/firestore.rules](firebase/firestore.rules:192).
   - New per-chat, per-player inventories at `/goteChats/{chatId}/inventories/{uid}` with read/write/delete allowed for participants. See [firebase/firestore.rules](firebase/firestore.rules:204).
+
+## Updates (2025-10-06)
+- Teach Intro Scheduling
+  - Added collection `/teachIntros` for 15‑minute intro requests.
+  - Rules: signed‑in users can create and read their own; admin can list/read/update/delete.
+  - See [firebase/firestore.rules](firebase/firestore.rules)
+- Day Planner (admin-only)
+  - Added collection `/plannerDays/{YYYY-MM-DD}` with subcollection `/items/{itemId}` for day planning.
+  - Rules: admin-only for get/list/create/update/delete on both day docs and items.
+  - Used by the Planner tab in [src/app/clients/page.tsx](src/app/clients/page.tsx) to schedule:
+    - APPOINTMENT (Client Appointment), CHECKIN (Client Check In), TASK, ADVERTIME, BREAK.
+  - See [firebase/firestore.rules](firebase/firestore.rules)

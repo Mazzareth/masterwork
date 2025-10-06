@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useAuth } from "../../contexts/AuthContext";
 import { useEffect, useState } from "react";
 import { db } from "../../lib/firebase";
@@ -10,10 +11,19 @@ import { ensurePushPermissionAndToken } from "../../lib/notifications";
 
 export default function CCPage() {
   const { user, permissions, loading, loginWithGoogle } = useAuth();
+  const router = useRouter();
   // Linked-access probe for users without cc permission
   const [linkCheck, setLinkCheck] = useState<"idle" | "checking" | "has" | "none">("idle");
   // Live chat summaries for dashboard when allowed
   const [chats, setChats] = useState<ChatSummary[]>([]);
+  // Redirects to /teach when unauthenticated or no CC access and no linked chats
+  useEffect(() => {
+    if (!loading && !user) router.replace("/teach");
+  }, [loading, user, router]);
+  const allowed = Boolean(permissions?.cc) || linkCheck === "has";
+  useEffect(() => {
+    if (!loading && user && !allowed) router.replace("/teach");
+  }, [loading, user, allowed, router]);
   // Derived: only chats where user is still a participant (filters revoked links)
   const [displayChats, setDisplayChats] = useState<ChatSummary[]>([]);
   // Commission progress mirror from chat doc
@@ -139,7 +149,6 @@ export default function CCPage() {
     );
   }
 
-  const allowed = Boolean(permissions?.cc) || linkCheck === "has";
   if (!allowed) {
     return (
       <div className="min-h-screen grid place-items-center">

@@ -12,6 +12,7 @@
 - Header
   - [src/app/Header.tsx](src/app/Header.tsx)
     - Global sticky header with navigation (based on `pageVisibility` + Firestore `permissions`) and auth controls. Rendered inside `AuthProvider` in layout.
+    - On /teach, the brand text is "Lessons" and nav entries are hidden to keep the teaching site isolated.
 - Hub (Main Page)
   - [src/app/page.tsx](src/app/page.tsx)
     - Client component:
@@ -20,10 +21,12 @@
       - If signed in: grid of destination cards, filtered by `pageVisibility` and Firestore `permissions`.
       - Cards are accessible, hover-elevated, and responsive.
 - Routes (with auth/permission gates):
+  - [src/app/teach/page.tsx](src/app/teach/page.tsx)
   - [src/app/gote/page.tsx](src/app/gote/page.tsx)
   - [src/app/zzq/page.tsx](src/app/zzq/page.tsx)
   - [src/app/cc/page.tsx](src/app/cc/page.tsx)
   - [src/app/inhouse/page.tsx](src/app/inhouse/page.tsx)
+  - Clients (Admin): [src/app/clients/page.tsx](src/app/clients/page.tsx) — only mercysquadrant@gmail.com; shows teachIntros, admin notes, and progress; path /clients.
   - Commission Pages:
     - Dynamic client entrypoint: [src/app/commission/[slug]/page.tsx](src/app/commission/[slug]/page.tsx)
     - Artists configure slug in ZZQ Settings; clients visit /commission/{slug}, sign in, and submit a brief to open a chat.
@@ -33,7 +36,8 @@
 - UI visibility toggles: [src/config/pages.ts](src/config/pages.ts)
 
 ## Design Notes
-- New users default to ZZQ-only permission; CC/InHouse disabled until enabled in Firestore.
+- New users default to Teach-only permission; all other apps are disabled until explicitly granted in Firestore.
+- Root ("/") auto-redirects to /teach when the user is signed out or when Teach is the only allowed app.
 - The old “visibility toggles” footer line has been removed; refer to [src/config/pages.ts](src/config/pages.ts) for toggles.
 - Geist fonts are applied globally via CSS variable `--font-geist-sans`.
 - Global UI utilities (2025-09):
@@ -64,3 +68,7 @@
 - Push Notifications:
   - Device-level enable/disable from the ZZQ sidebar; stores/deletes FCM token under `/users/{uid}/notificationTokens/{token}` via [`ensurePushPermissionAndToken()`](src/lib/notifications.ts:20) and [`disablePushForThisDevice()`](src/lib/notifications.ts:122).
   - Per-client notification preference toggle on the Client View header; writes `notificationsEnabled` on the client doc at `/users/{uid}/sites/zzq/clients/{clientId}` (owner-only).
+
+## Fixes (2025-10-06)
+- Hydration mismatch on "/" resolved by rendering Header via a client wrapper [`src/app/HeaderClient.tsx`](src/app/HeaderClient.tsx) that returns null until mounted. Imported in [`src/app/layout.tsx`](src/app/layout.tsx) as a Client Component boundary, which is allowed in RSC.
+- Rationale: Header’s route-dependent classes (derived from `usePathname`) could differ between SSR and client during initial navigation, causing className mismatches. Client-only mount guarantees parity at hydration.

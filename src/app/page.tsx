@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { PAGE_LABELS, pageVisibility } from "../config/pages";
 
@@ -11,6 +13,7 @@ type Entry = {
 };
 
 const entries: Entry[] = [
+  { key: "teach", href: "/teach", label: PAGE_LABELS.teach },
   { key: "zzq", href: "/zzq", label: PAGE_LABELS.zzq },
   { key: "cc", href: "/cc", label: PAGE_LABELS.cc },
   { key: "inhouse", href: "/inhouse", label: PAGE_LABELS.inhouse },
@@ -18,6 +21,21 @@ const entries: Entry[] = [
 
 export default function Home() {
   const { user, permissions, loading, loginWithGoogle } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (loading) return;
+    if (!user) {
+      router.replace("/teach");
+      return;
+    }
+    if (permissions) {
+      const other = Boolean(permissions.zzq || permissions.cc || permissions.inhouse || permissions.gote);
+      if (!other && permissions.teach) {
+        router.replace("/teach");
+      }
+    }
+  }, [user, permissions, loading, router]);
 
   const visibleEntries =
     user && permissions

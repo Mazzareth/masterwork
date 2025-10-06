@@ -1,10 +1,25 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 
 export default function InHousePage() {
   const { user, permissions, loading, loginWithGoogle } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!loading && !user) {
+      router.replace("/teach");
+    }
+  }, [loading, user, router]);
+
+  useEffect(() => {
+    if (!loading && user && !permissions?.inhouse) {
+      router.replace("/teach");
+    }
+  }, [loading, user, permissions?.inhouse, router]);
 
   if (loading) {
     return <div className="min-h-screen grid place-items-center">Loading…</div>;

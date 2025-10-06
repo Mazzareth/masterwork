@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { db } from "../../lib/firebase";
@@ -169,6 +170,14 @@ function LevelBar({ label, levels, value }: { label: string; levels: string[]; v
 
 export default function BigGotePage() {
   const { user, permissions, loading, loginWithGoogle } = useAuth();
+  const router = useRouter();
+
+  // If not signed in, hide this route by redirecting to /teach
+  useEffect(() => {
+    if (!loading && !user) {
+      router.replace("/teach");
+    }
+  }, [loading, user, router]);
 
   // Pane widths (px) with bounds and persistence
   const MIN_LEFT = 220;
@@ -912,6 +921,14 @@ export default function BigGotePage() {
   }
 
   const allowed = Boolean(permissions?.gote) || linkCheck === "has";
+
+  // If signed-in but not allowed (and not still checking linked access), redirect to /teach
+  useEffect(() => {
+    if (!loading && user && !allowed && !(linkCheck === "idle" || linkCheck === "checking")) {
+      router.replace("/teach");
+    }
+  }, [loading, user, allowed, linkCheck, router]);
+
   const isCheckingLinkedAccess =
     !!user && !permissions?.gote && (linkCheck === "idle" || linkCheck === "checking");
 

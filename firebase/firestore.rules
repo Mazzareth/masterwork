@@ -38,6 +38,7 @@ service cloud.firestore {
     function hasValidPermissions() {
       return
         (request.resource.data.permissions is map) &&
+        (request.resource.data.permissions.teach is bool) &&
         (request.resource.data.permissions.zzq is bool) &&
         (request.resource.data.permissions.cc is bool) &&
         (request.resource.data.permissions.inhouse is bool) &&
@@ -327,6 +328,30 @@ service cloud.firestore {
       allow create, update, delete, list: if isSignedIn() && request.auth.token.email == "mercysquadrant@gmail.com";
       // Admin and the user themselves may read their own allowlist entry
       allow get: if isSignedIn() && (request.auth.token.email == "mercysquadrant@gmail.com" || request.auth.uid == uid);
+    }
+
+    // Teach Intro Scheduling
+    // Collection for 15-minute intro requests created by signed-in users.
+    // Access:
+    // - create: any signed-in user may create their own request (status="requested")
+    // - get: admin can read all; users can read their own docs
+    // - list/update/delete: admin only
+    match /teachIntros/{introId} {
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.status == "requested";
+      allow get: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow list: if isAdmin();
+      allow update, delete: if isAdmin();
+    }
+
+    // Day Planner (admin-only)
+    // Day docs keyed by YYYY-MM-DD with subcollection /items
+    match /plannerDays/{dayId} {
+      allow get, list, create, update, delete: if isAdmin();
+      match /items/{itemId} {
+        allow get, list, create, update, delete: if isAdmin();
+      }
     }
 
     // Default deny

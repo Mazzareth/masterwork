@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useAuth } from "../../contexts/AuthContext";
@@ -117,6 +118,21 @@ function StatusBadge({ status }: { status: Project["status"] }) {
 
 export default function ZZQPage() {
   const { user, permissions, loading, loginWithGoogle } = useAuth();
+  const router = useRouter();
+
+  // Redirect unauthenticated users away from owner routes
+  useEffect(() => {
+    if (!loading && !user) {
+      router.replace("/teach");
+    }
+  }, [loading, user, router]);
+
+  // If signed in but lacking ZZQ access, hide this route
+  useEffect(() => {
+    if (!loading && user && !permissions?.zzq) {
+      router.replace("/teach");
+    }
+  }, [loading, user, permissions?.zzq, router]);
   const ownerUid = user?.uid ?? null;
   // Unified ghost button style for Client header actions
   const headerBtnBase =

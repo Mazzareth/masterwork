@@ -6,7 +6,7 @@
 
 ## Components
 - [src/config/pages.ts](src/config/pages.ts)
-  - `pageVisibility`: object toggles for `zzq`, `cc`, `inhouse`, `gote`.
+  - `pageVisibility`: object toggles for `teach`, `gote`, `zzq`, `cc`, `inhouse`.
   - `PAGE_LABELS`: display labels.
 
 ## Notes
@@ -27,3 +27,7 @@
 
 ## Updates (2025-09-29)
 - Upgraded DEFAULT_NARRATOR_RULES to codify the Impartial Reality Engine, PvP protocol, and allowed mechanical actions aligned with [patchGoteInventory()](src/lib/gote.ts:446) and [patchGoteCharacterState()](src/lib/gote.ts:650). Used by Finish Turn via [handleFinishTurn()](src/app/gote/page.tsx:597).
+
+## Instrument Info (Teach)
+- Centralized copy and per‑instrument concepts: [src/config/instrumentinfo.ts](src/config/instrumentinfo.ts:1).
+- Used by [SchedulingForm()](src/app/teach/components/SchedulingForm.tsx:1) and [InstrumentCards()](src/app/teach/components/InstrumentCards.tsx:1).

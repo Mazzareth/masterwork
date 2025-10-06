@@ -3,10 +3,11 @@
 Masterwork.app is a simple portal that lists whitelisted pages as buttons, gated by Firebase Auth (Google) and per-user Firestore permissions.
 
 ## Overview
-- Main page renders buttons for ZZQ, CC, and InHouse.
-- Visibility of each button is controlled by a UI config variable, and access is enforced by Firestore-stored permissions on the user's document.
+- Root hub lists permitted destinations (Teach, ZZQ, CC, InHouse, BigGote).
+- Visibility of each button is controlled by UI config; access is enforced by Firestore-stored permissions on the user's document.
 - Authentication uses Firebase Auth (Google Sign-In).
-- User document is bootstrapped on first login with default permissions: ZZQ = true, CC/InHouse = false.
+- Default on first login: Teach = true; ZZQ/CC/InHouse/BigGote = false.
+- Signed-out users and Teach-only users are redirected to /teach.
 
 ## Components
 - [src/lib/firebase.ts](src/lib/firebase.ts)
@@ -31,13 +32,14 @@ Masterwork.app is a simple portal that lists whitelisted pages as buttons, gated
 - Doc ID: `uid`
 - Shape:
   - `profile`: `{ uid: string; email?: string | null; displayName?: string | null; photoURL?: string | null }`
-  - `permissions`: `{ zzq: boolean; cc: boolean; inhouse: boolean }`
+  - `permissions`: `{ teach: boolean; zzq: boolean; cc: boolean; inhouse: boolean; gote: boolean }`
   - `createdAt`, `updatedAt`: server timestamps
 
 ## Firestore Security Rules
 - Users can read and write only their own document.
-- Permissions object must be a boolean map with `zzq`, `cc`, `inhouse`.
+- Permissions object must be a boolean map with `teach`, `zzq`, `cc`, `inhouse`, `gote`.
 - Rules file: [firebase/firestore.rules](firebase/firestore.rules)
+- Note: Inline sample below is legacy; see rules file for the authoritative source.
 
 Inline for reference:
 ```
@@ -90,11 +92,11 @@ service cloud.firestore {
 3) Test the flow
 - Run dev server: `npm run dev`
 - Sign in with Google.
-- Verify a doc appears under `users/{uid}` with default permissions granting ZZQ only.
+- Verify a doc appears under `users/{uid}` with default permissions granting Teach only.
 - Toggle UI visibility via [src/config/pages.ts](src/config/pages.ts) if you need to hide a button regardless of permissions.
 
 ## Notes
-- Default access: If a new user signs in and no document exists, they are initialized with ZZQ=true and CC/InHouse=false.
+- Default access: New users initialize with Teach=true and all other apps=false. Root (/) redirects to /teach when signed out or Teach-only.
 - UI visibility is independent from permissions; both must be true to display a button.
 - Client components only. Server data access is not used here.
 

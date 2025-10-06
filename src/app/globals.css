@@ -106,3 +106,89 @@ body {
   -webkit-mask-image: linear-gradient(to bottom, transparent, black 16px, black calc(100% - 16px), transparent);
   mask-image: linear-gradient(to bottom, transparent, black 16px, black calc(100% - 16px), transparent);
 }
+
+/* Flip-card interactions */
+.flip-card { perspective: 1000px; }
+.flip-card-inner {
+  display: grid;
+  transform-style: preserve-3d;
+  transition: transform 500ms var(--ease-snap);
+  min-height: 180px;
+}
+.flip-card-inner.is-flipped { transform: rotateY(180deg); }
+.flip-card-front,
+.flip-card-back {
+  grid-area: 1 / 1;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.flip-card-back { transform: rotateY(180deg); }
+
+@media (prefers-reduced-motion: reduce) {
+  .flip-card-inner { transition: none; }
+}
+
+/* Range control tweaks */
+input[type="range"] { accent-color: #06b6d4; }
+
+/* Teach Scene: cosmic, aurora-inspired background used on /teach */
+.teach-scene {
+  position: relative;
+  background:
+    radial-gradient(1200px 800px at -10% -10%, rgba(34, 211, 238, 0.08), transparent 60%),
+    radial-gradient(1000px 900px at 110% 10%, rgba(167, 139, 250, 0.08), transparent 60%),
+    radial-gradient(800px 1000px at 50% 120%, rgba(244, 114, 182, 0.08), transparent 60%);
+  overflow: hidden;
+}
+.teach-scene::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(900px 600px at 10% -10%, rgba(34,211,238,.16), transparent 60%),
+    radial-gradient(900px 700px at 90% 0%, rgba(167,139,250,.14), transparent 60%),
+    radial-gradient(600px 800px at 50% 120%, rgba(244,114,182,.12), transparent 60%);
+  filter: saturate(1.1);
+}
+.teach-scene::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: conic-gradient(
+    from 200deg at 50% 20%,
+    rgba(34,211,238,.10),
+    rgba(167,139,250,.08),
+    rgba(244,114,182,.10),
+    rgba(34,211,238,.10)
+  );
+  mix-blend-mode: screen;
+  opacity: .6;
+  mask-image: radial-gradient(120% 90% at 50% 0%, black, transparent 65%);
+  -webkit-mask-image: radial-gradient(120% 90% at 50% 0%, black, transparent 65%);
+}
+
+@media (prefers-color-scheme: dark) {
+  .teach-scene {
+    background:
+      radial-gradient(1200px 800px at -10% -10%, rgba(34, 211, 238, 0.16), transparent 60%),
+      radial-gradient(1000px 900px at 110% 10%, rgba(167, 139, 250, 0.16), transparent 60%),
+      radial-gradient(800px 1000px at 50% 120%, rgba(244, 114, 182, 0.14), transparent 60%);
+  }
+  .teach-scene::after { opacity: .7; }
+}
+
+/* Optional star specks overlay (not required; decorative only) */
+.teach-stars {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(1px 1px at 20% 30%, rgba(255,255,255,.5), transparent 45%),
+    radial-gradient(1px 1px at 60% 20%, rgba(255,255,255,.45), transparent 45%),
+    radial-gradient(1px 1px at 80% 70%, rgba(255,255,255,.4), transparent 45%),
+    radial-gradient(1px 1px at 30% 80%, rgba(255,255,255,.35), transparent 45%),
+    radial-gradient(1px 1px at 40% 50%, rgba(255,255,255,.4), transparent 45%);
+  opacity: .4;
+}
