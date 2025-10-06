@@ -325,7 +325,7 @@ function DayPlanner() {
     const col = collection(db, "plannerDays", dayId, "items");
     const q = query(col, orderBy("startMin", "asc"));
     const unsub = onSnapshot(q, (snap) => {
-      const list: PlannerItem[] = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+      const list: PlannerItem[] = snap.docs.map((d) => ({ id: d.id, ...d.data() } as PlannerItem));
       setItems(list);
     });
     return () => unsub();
@@ -335,7 +335,7 @@ function DayPlanner() {
   useEffect(() => {
     const q = query(collection(db, "teachIntros"), orderBy("createdAt", "desc"));
     const unsub = onSnapshot(q, (snap) => {
-      const list = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as TeachIntroDoc[];
+      const list = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as TeachIntroDoc[];
       setIntros(list);
     });
     return () => unsub();
@@ -878,11 +878,7 @@ export default function ClientsPage() {
     if (!isAdmin) return;
     const q = query(collection(db, "teachIntros"), orderBy("createdAt", "desc"));
     const unsub = onSnapshot(q, (snap) => {
-      const list = snap.docs.map((d) => {
-        const data = d.data() as any;
-        const docItem: TeachIntroDoc = { id: d.id, ...data };
-        return docItem;
-      });
+      const list = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as TeachIntroDoc[];
       setItems(list);
       setDraftNotes((prev) => {
         const next = { ...prev };

@@ -226,10 +226,10 @@ export default function SchedulingForm() {
         throw new Error("Provide at least an email or phone number.");
 
       const phoneNormalized = normalizePhone(form.phone);
-      const conceptsByInstrument: Record<
+      const conceptsByInstrument: Partial<Record<
         InstrumentKey,
         Record<string, number>
-      > = {} as any;
+      >> = {};
 
       for (const inst of selected) {
         const list = CONCEPTS[inst];
@@ -284,9 +284,11 @@ export default function SchedulingForm() {
         goalsNotes: "",
         availabilityNotes: "",
       }));
-    } catch (err: any) {
+    } catch (err: unknown) {
       const msg =
-        typeof err?.message === "string" ? err.message : "Failed to submit. Please try again.";
+        typeof err === "object" && err !== null && "message" in err && typeof (err as { message: unknown }).message === "string"
+          ? (err as { message: string }).message
+          : "Failed to submit. Please try again.";
       setError(msg);
     } finally {
       setSaving(false);

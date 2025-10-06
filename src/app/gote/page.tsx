@@ -291,6 +291,15 @@ export default function BigGotePage() {
       canceled = true;
     };
   }, [user, permissions?.gote]);
+  
+  // Access gating: compute allowed and redirect unauthorized signed-in users to /teach
+  const allowed = Boolean(permissions?.gote) || linkCheck === "has";
+
+  useEffect(() => {
+    if (!loading && user && !allowed && !(linkCheck === "idle" || linkCheck === "checking")) {
+      router.replace("/teach");
+    }
+  }, [loading, user, allowed, linkCheck, router]);
 
   // Middle: chat messages
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -920,51 +929,7 @@ export default function BigGotePage() {
     );
   }
 
-  const allowed = Boolean(permissions?.gote) || linkCheck === "has";
 
-  // If signed-in but not allowed (and not still checking linked access), redirect to /teach
-  useEffect(() => {
-    if (!loading && user && !allowed && !(linkCheck === "idle" || linkCheck === "checking")) {
-      router.replace("/teach");
-    }
-  }, [loading, user, allowed, linkCheck, router]);
-
-  const isCheckingLinkedAccess =
-    !!user && !permissions?.gote && (linkCheck === "idle" || linkCheck === "checking");
-
-  if (isCheckingLinkedAccess) {
-    return (
-      <div className="min-h-screen grid place-items-center bg-black text-white">
-        <div className="flex flex-col items-center gap-4">
-          <h1 className="text-xl font-semibold">Preparing access…</h1>
-          <p className="text-white/70">Checking your BigGote link.</p>
-          <Link
-            href="/"
-            className="text-sm text-white/80 hover:underline active:opacity-80 transition"
-          >
-            Back to Home
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
-  if (!allowed) {
-    return (
-      <div className="min-h-screen grid place-items-center bg-black text-white">
-        <div className="flex flex-col items-center gap-4">
-          <h1 className="text-xl font-semibold">Not authorized</h1>
-          <p className="text-white/70">You do not have access to BigGote.</p>
-          <Link
-            href="/"
-            className="text-sm text-white/80 hover:underline active:opacity-80 transition"
-          >
-            Back to Home
-          </Link>
-        </div>
-      </div>
-    );
-  }
 
   // Main
   return (

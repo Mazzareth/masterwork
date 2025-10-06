@@ -130,6 +130,10 @@
   - Removed Enjoyment sliders; added Character Information, Position (top/bottom), Role (dominant/submissive)
   - Added `/goteChats/{chatId}/profiles/{uid}` with participant-readable and owner-of-uid writable rules
   - Eliminated console permission errors originating from missing profile rules
+- 2025‑10‑06 — Build fixes
+  - Removed unused isCheckingLinkedAccess variable that was causing ESLint warning
+  - Fixed conditional React Hook usage by moving the redirect gating effect above early returns to satisfy rules-of-hooks. See [src/app/gote/page.tsx](src/app/gote/page.tsx).
+  - These fixes resolve the build errors that were preventing successful compilation
 
 Did I explain the functionality clearly in Context.md? Yes.
 Would another engineer understand the purpose of this directory/codebase within 2 minutes? Yes.

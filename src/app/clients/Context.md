@@ -45,6 +45,7 @@
 - All UI is client-side with `onSnapshot` live updates.
 - Time math stored in minutes-from-midnight for simple layout and conflict checks later.
 - Color coding for readability; mobile-friendly layout with simple list editing.
+- Firestore doc mapping for teachIntros uses a type assertion when reading from snapshots to satisfy TypeScript since d.data() returns untyped DocumentData. See [src/app/clients/page.tsx](src/app/clients/page.tsx:881) and [src/app/clients/page.tsx](src/app/clients/page.tsx:338).
 
 ## References
 - Page: [src/app/clients/page.tsx](src/app/clients/page.tsx)

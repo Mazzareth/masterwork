@@ -33,7 +33,7 @@
     - profileSnapshot: { uid, email, displayName, photoURL }
     - contact: { name, email?, phone?, phoneNormalized?, preferredContact, role, studentName?, timezone }
     - instruments: InstrumentKey[]
-    - conceptsByInstrument: Record<InstrumentKey, Record<conceptId, 0..4>>
+    - conceptsByInstrument: Partial<Record<InstrumentKey, Record<conceptId, 0..4>>>
     - notes: { availability?, goals? }
     - clientMeta: { ua?, lang? }
 - Rules: see Teach Intro Scheduling in [firebase/firestore.rules](firebase/firestore.rules)
@@ -65,6 +65,7 @@
 ## Notes
 - Phone normalization is best-effort (+1 for US numbers). Adjust if supporting international formats broadly.
 - Admin email is currently checked in rules; consider migrating to admin UID/role for robustness.
+- Only selected instruments are stored in `conceptsByInstrument` to keep payload minimal; typed as `Partial<Record<InstrumentKey, ...>>` in [SchedulingForm()](src/app/teach/components/SchedulingForm.tsx:1).
 
 ## References
 - Page integration: [src/app/teach/page.tsx](src/app/teach/page.tsx:1)
